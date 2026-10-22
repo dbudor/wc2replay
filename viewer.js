@@ -78,7 +78,7 @@ const ui = { status: $('status'), controls: $('controls'), play: $('play'), step
   logSounds: $('logSounds'), logVoices: $('logVoices'), drop: $('drop'), wrap: $('viewWrap'),
   peerBox: $('peerBox'), peer: $('peer'), save: $('save'), rules: $('rules'),
   pview: $('pview'), follow: $('follow'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
-  camShow: $('camShow'), camBox: $('camBox') };
+  camShow: $('camShow'), camBox: $('camBox'), listBox: $('listBox'), replayList: $('replayList') };
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
   capture: null, captureName: '', converted: null,
@@ -315,6 +315,64 @@ if (loadList) (async () => {
   }
   addFiles(fl);
 })();
+
+// The replays folder: replays/index.json = [{ name (path under replays/), size, mtime (s) }], written live by
+// tools/dist/serve.py (its --replays DIR, default the viewer's replays/ folder) or as a static file by make_dist.sh.
+// Picking an entry fetches it like a picked file; a capture or .w2r on a custom map brings its .pud along when the
+// folder has one of that name. Re-read when the page gets the focus back (new captures show up).
+const REPLAY_EXT = /\.(w2r|pcapng|pcap|cap|w2c|pud)$/i;
+let replayIndex = [];
+async function refreshReplayList() {
+  if (!/^https?:$/.test(location.protocol)) return;
+  let list;
+  try { const r = await fetch('replays/index.json', { cache: 'no-store' }); if (!r.ok) return; list = await r.json(); } catch { return; }
+  if (!Array.isArray(list)) return;
+  replayIndex = list.filter(e => e && typeof e.name === 'string' && REPLAY_EXT.test(e.name) && !/(^|\/)\.\.?(\/|$)/.test(e.name))
+    .sort((a, b) => (b.mtime || 0) - (a.mtime || 0) || a.name.localeCompare(b.name));
+  const sel = ui.replayList, keep = sel.value;
+  sel.length = 0;
+  sel.add(new Option(replayIndex.length ? `${replayIndex.filter(e => !/\.(pud|w2c)$/i.test(e.name)).length} in replays/…` : 'replays/ is empty', ''));
+  const two = n => String(n).padStart(2, '0');
+  const when = t => { if (!t) return ''; const d = new Date(t * 1000); return ` · ${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`; };
+  const kb = n => n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+  for (const e of replayIndex) sel.add(new Option(`${e.name}${when(e.mtime)}${e.size ? ' · ' + kb(e.size) : ''}`, e.name));
+  sel.value = replayIndex.some(e => e.name === keep) ? keep : '';
+  ui.listBox.hidden = false;
+}
+// .pud name a .w2r's PUD chunk names (custom map), or ''
+function w2rPudName(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let o = 8; o + 8 <= b.length;) {
+    const tag = String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]), len = dv.getUint32(o + 4, true);
+    if (tag === 'PUD ' && len > 8 && dv.getUint32(o + 8, true)) { let e = o + 16; while (e < o + 8 + len && b[e]) e++; return String.fromCharCode(...b.subarray(o + 16, e)); }
+    if (tag === 'TURN' || tag === 'END ') break;
+    o += 8 + len;
+  }
+  return '';
+}
+async function loadFromList(name) {
+  const url = n => 'replays/' + n.split('/').map(encodeURIComponent).join('/');
+  const get = async n => { const r = await fetch(url(n), { cache: 'no-store' }); if (!r.ok) throw new Error(`cannot fetch replays/${n} (${r.status})`); return new Uint8Array(await r.arrayBuffer()); };
+  const file = (n, b) => ({ name: n.split('/').pop(), arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
+  setStatus(`Loading replays/${name}…`);
+  const b = await get(name), fl = [file(name, b)];
+  let map = '';
+  if (/\.w2r$/i.test(name)) map = w2rPudName(b);
+  else if (/\.(pcapng|pcap|cap)$/i.test(name)) { try { const c = parseCapture(b); if (c.customMap) map = c.mapName + '.pud'; } catch { /* addFiles reports it */ } }
+  const base = s => s.replace(/^.*[\\/]/, '').toLowerCase();
+  const pud = map && !picked.puds.has(base(map)) && replayIndex.find(e => /\.pud$/i.test(e.name) && base(e.name) === base(map));
+  if (pud) fl.unshift(file(pud.name, await get(pud.name)));
+  await addFiles(fl);
+}
+ui.replayList.onchange = async () => {
+  const n = ui.replayList.value; if (!n) return;
+  ui.replayList.disabled = true;
+  try { await loadFromList(n); } catch (e) { reportError(e); }
+  ui.replayList.disabled = false;
+};
+refreshReplayList();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshReplayList(); });
+window.addEventListener('focus', () => refreshReplayList());
 
 function replayTurnCount(b) {   // .w2r: "W2R1", u32 version, chunks {u32 tag, u32 len, data}; END = u32 turn count
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
