@@ -51,7 +51,11 @@ Controls: Play/Pause, Step (one network turn), speed, timeline seek, drag to scr
 the minimap, fog of war as any player.
 Keys: Space play/pause, . step one turn, Left/Right skip 10 s back/forward, 1-8 view as player 1-8,
 9 no fog, P toggle player view (that player's fog, selection, camera, UI and voices), F re-follow the
-selection in player view, H toggle HP bars.
+selection in player view, H toggle HP bars, Esc close the unit card.
+Click a unit or building on the map (free or player view) for its stats, as the game's status panel has them, for
+any player: armor, damage, range, sight with upgrade bonuses, speed, magic, current order, a worker's load, a
+transport's cargo, spell timers; construction and training / research progress with the time left; gold or oil
+left in a mine, food grown/used at a farm, a town hall's production rates. The card follows the unit as it plays.
 Sound plays at 1x and 2x speed (positional, as the game does for the viewed player); the "voices" box adds unit
 selection/acknowledge voices. The game's palette animations (water, shores, ship wakes) run as in the game.
 Battle.net Edition's music was CD audio and is not in War2Dat.mpq; if you have the tracks as HUMAN1.WAV ... ORC6.WAV

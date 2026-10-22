@@ -66,6 +66,7 @@ import { readUnits, readPlayers, tickMs, soundNames, UNIT_NAMES, A } from './gam
 import { GameAudio, isMusicFile, ALT_SOUND } from './audio.js';
 import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outcome, playerStats, GameTracker, OUTCOME_TEXT } from './screens.js';
 import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, trackGeometry, mouseTarget, loadCursor, isW2c } from './camrec.js';
+import { pickUnit, unitRef, refAlive, unitInfo } from './unitinfo.js';
 import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visibleMessages, FRAME_W, FRAME_H, MAP_RECT, MINI_RECT } from './playerview.js';
 
 
@@ -78,7 +79,7 @@ const ui = { status: $('status'), controls: $('controls'), play: $('play'), step
   logSounds: $('logSounds'), logVoices: $('logVoices'), drop: $('drop'), wrap: $('viewWrap'),
   peerBox: $('peerBox'), peer: $('peer'), save: $('save'), rules: $('rules'),
   pview: $('pview'), follow: $('follow'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
-  camShow: $('camShow'), camBox: $('camBox'), listBox: $('listBox'), replayList: $('replayList') };
+  camShow: $('camShow'), camBox: $('camBox'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect') };
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
   capture: null, captureName: '', converted: null,
@@ -649,6 +650,8 @@ function setPlayerView(on) {
   st.pv.on = on; ui.pview.checked = on;
   document.body.classList.toggle('pview', on);
   (on ? ui.pvSlot : ui.viewRow).prepend(ui.viewOpts);   // keep the selector + toggle reachable
+  if (on) ui.wrap.append(ui.inspect); else $('players').before(ui.inspect);   // the inspect card floats over the game screen
+  ui.inspect.classList.toggle('float', on);
   if (on) {
     if (+ui.fog.value < 0) { ui.fog.value = String(pvPlayer()); }
     st.renderer.fogPlayer = +ui.fog.value;
@@ -670,6 +673,7 @@ ui.camShow.onchange = () => { st.pv.camRec = true; };
 window.addEventListener('keydown', e => {
   if (!st.session || e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
   if (e.key === ' ') { e.preventDefault(); playPressed(); }
+  else if (e.key === 'Escape' && st.inspect) { st.inspect = null; drawInspect(st.session.mem()); }
   else if (e.key === '.') stepPressed();
   else if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey && !lobbyUp()) setPlayerView(!st.pv.on);
   else if ((e.key === 'f' || e.key === 'F') && st.pv.on && !e.ctrlKey && !e.metaKey) pvFollow();
@@ -765,7 +769,7 @@ ui.view.addEventListener('pointerdown', e => {
   }
   if (st.screen) { closeScreen(); return; }
   if (st.pv.on) { pvPointerDown(e); return; }
-  drag = { x: e.clientX, y: e.clientY, vx: st.view.x, vy: st.view.y }; ui.view.setPointerCapture(e.pointerId); ui.view.classList.add('drag'); });
+  drag = { x: e.clientX, y: e.clientY, vx: st.view.x, vy: st.view.y, moved: false }; ui.view.setPointerCapture(e.pointerId); ui.view.classList.add('drag'); });
 // player view: frame coordinates of a pointer event (the 640x480 screen is scaled into the canvas)
 function pvPoint(e) {
   const r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1, q = st.pv.rect;
@@ -796,9 +800,19 @@ ui.view.addEventListener('pointermove', e => {
     st.pv.cam.x = drag.vx - dx; st.pv.cam.y = drag.vy - dy; st.pv.cam.clamp(st.session.mem());
     return;
   }
+  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+  drag.moved = true;
   st.view.x = drag.vx - (e.clientX - drag.x) * d / st.view.scale; st.view.y = drag.vy - (e.clientY - drag.y) * d / st.view.scale; clampView(); st.viewWant = viewCentre();
 });
-ui.view.addEventListener('pointerup', () => { drag = null; ui.view.classList.remove('drag'); });
+ui.view.addEventListener('pointerup', e => {
+  const was = drag; drag = null; ui.view.classList.remove('drag');
+  if (!was || was.moved || was.mini || !st.session) return;
+  const r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  if (was.pv) {   // player view: frame point -> map pixel through the camera
+    const pt = pvPoint(e); if (!inRect(pt, MAP_RECT)) return;
+    inspectAt(st.pv.lastView.x + pt.x - MAP_RECT.x, st.pv.lastView.y + pt.y - MAP_RECT.y, pvPlayer());
+  } else inspectAt(st.view.x + (e.clientX - r.left) * d / st.view.scale, st.view.y + (e.clientY - r.top) * d / st.view.scale, +ui.fog.value);
+});
 ui.view.addEventListener('wheel', e => {
   if (!st.session || st.pv.on) return;   // the player view keeps the game's own scale
   e.preventDefault();
@@ -828,7 +842,7 @@ function drawPlayerView(ctx, W, H, m) {
     const c = st.pv.cam; c.x = rec.vx * 32; c.y = rec.vy * 32; c.clamp(m); view = { x: Math.round(c.x), y: Math.round(c.y) };
   }
   const ticks = st.pv.lastTick < 0 || s.tick < st.pv.lastTick || s.tick - st.pv.lastTick > 400 ? -1 : s.tick - st.pv.lastTick;
-  st.pv.lastTick = s.tick;
+  st.pv.lastTick = s.tick; st.pv.lastView = view;
   const c = st.pv.frame.render({ m, p, renderer: st.renderer, fog: st.fog, view, selection: sel, counterFrames: ticks,
     messages: visibleMessages(st.pv.messages, p, s.tick, st.tickMs) });
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
@@ -838,6 +852,12 @@ function drawPlayerView(ctx, W, H, m) {
   ctx.imageSmoothingEnabled = k < 1;
   ctx.drawImage(c, 0, 0, FRAME_W, FRAME_H, x, y, w, h);
   st.pv.rect = { x, y, k };
+  const iu = inspectedUnit(m);
+  if (iu) {   // the inspected unit's box, inside the map pane
+    ctx.save(); ctx.beginPath(); ctx.rect(x + MAP_RECT.x * k, y + MAP_RECT.y * k, MAP_RECT.w * k, MAP_RECT.h * k); ctx.clip();
+    inspectBox(ctx, m, iu, view.x - MAP_RECT.x, view.y - MAP_RECT.y, k, x, y);
+    ctx.restore();
+  }
   const cur = rec && cursorFor(p);
   if (cur) {   // the game's cursor at the recorded mouse point (clipped to the 640x480 screen)
     ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
@@ -876,6 +896,7 @@ function draw() {
   if (st.pv.on && st.pv.frame) {
     drawPlayerView(ctx, W, H, m);
     lastDraw = performance.now();
+    if (lastDraw - lastPanel > 200) { lastPanel = lastDraw; drawInspect(m); }
     if (st.screen && updateScreen()) drawScreen(ctx, W, H);
     updateClock();
     return;
@@ -883,6 +904,7 @@ function draw() {
   lastDraw = performance.now();
   clampView();
   st.renderer.draw(ctx, W, H, st.view, m, st.fog);
+  { const iu = inspectedUnit(m); if (iu && !st.screen) inspectBox(ctx, m, iu, st.view.x, st.view.y, st.view.scale, 0, 0); }
   if (st.screen && updateScreen()) drawScreen(ctx, W, H);
   // minimap
   const mc = st.renderer.drawMinimap(m, st.fog), mctx = ui.mini.getContext('2d'), S = ui.mini.width, n = mc.width;
@@ -894,7 +916,51 @@ function draw() {
   if (camOn() && !st.screen) drawCams(ctx, m, mctx, k);
   updateClock();
   const now = performance.now();
-  if (now - lastPanel > 200) { lastPanel = now; drawPlayers(m); }
+  if (now - lastPanel > 200) { lastPanel = now; drawPlayers(m); drawInspect(m); }
+}
+
+// ---------------------------------------------------------------- click to inspect (unitinfo.js)
+// A click on the map picks the unit / building under it (what that view shows: the fog player's view of it),
+// its stats go into the side panel (#inspect) and a white box marks it; Esc or a click on nothing clears it.
+function inspectAt(px, py, fp) {
+  const m = st.session.mem(), R = st.renderer, keep = R.fogPlayer;
+  const u = pickUnit(m, px, py, fp >= 0 ? a => { R.fogPlayer = fp; const v = m.r8(a + 0x2c) === fp || R._unitVisible(m, a); R.fogPlayer = keep; return v; } : null);
+  st.inspect = unitRef(m, u);
+  drawInspect(m);
+}
+function inspectedUnit(m) {
+  const r = st.inspect;
+  return r && refAlive(m, r) === 'ok' && !(m.r16(r.addr + 0x1e) & 8) ? r.addr : 0;
+}
+// 1 px white box with a dark edge around the type box (map pixels -> canvas: (p - v) * s + o)
+function inspectBox(ctx, m, u, vx, vy, s, ox, oy) {
+  const t = m.r8(u + 0x27), bw = (m.r16(A.TypeBox + 4 * t) << 16) >> 16, bh = (m.r16(A.TypeBox + 4 * t + 2) << 16) >> 16;
+  const cx = m.s16(u) + 16 * m.r16(A.TypeSize + 4 * t), cy = m.s16(u + 2) + 16 * m.r16(A.TypeSize + 4 * t + 2);
+  const X = ox + (cx - bw / 2 - 3 - vx) * s, Y = oy + (cy - bh / 2 - 3 - vy) * s, w = (bw + 6) * s, h = (bh + 6) * s;
+  ctx.lineWidth = Math.max(1, s); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.strokeRect(X - ctx.lineWidth, Y - ctx.lineWidth, w + 2 * ctx.lineWidth, h + 2 * ctx.lineWidth);
+  ctx.strokeStyle = '#fff'; ctx.strokeRect(X, Y, w, h);
+}
+function drawInspect(m) {
+  const esc = x => String(x).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+  const el = ui.inspect, r = st.inspect;
+  if (!r) { if (!el.hidden) { el.hidden = true; el.innerHTML = ''; } return; }
+  const alive = refAlive(m, r);
+  let html;
+  if (alive === 'gone') html = `<div class="inspHead"><span>${esc(st.inspectName || 'Unit')}</span><button class="inspX" title="Close (Esc)">×</button></div><div class="inspNote">no longer exists</div>`;
+  else {
+    const I = unitInfo(m, r.addr, { tbl: st.pv.art && st.pv.art.statTxt, tickMs: st.tickMs, names: st.pv.names, extended: !!m.r32(A.Extended) });
+    st.inspectName = I.name;
+    const c = I.owner < 8 ? st.tileset.rgb[m.r8(A.PlayerColor + I.owner)] || [128, 128, 128] : [160, 160, 160];
+    const hpf = I.maxHp ? Math.min(1, I.hp / I.maxHp) : 0, hpc = hpf > 0.5 ? '#2c2' : hpf > 0.25 ? '#dc2' : '#d22';
+    html = `<div class="inspHead"><span>${esc(I.name)}</span><button class="inspX" title="Close (Esc)">×</button></div>` +
+      `<div class="inspOwner"><i style="background:rgb(${c.join(',')})"></i>${esc(I.ownerName)}${alive === 'dead' ? ' · <b>dead</b>' : ''}</div>` +
+      (I.maxHp ? `<div class="inspBar"><b style="width:${(100 * hpf).toFixed(1)}%;background:${hpc}"></b><span>${I.hp} / ${I.maxHp} HP</span></div>` : '') +
+      I.bars.map(b => `<div class="inspLbl">${esc(b.label)}</div><div class="inspBar prog"><b style="width:${(100 * b.frac).toFixed(1)}%"></b><span>${esc(b.text)}${b.left ? ` · ${esc(b.left)} left` : ''}</span></div>`).join('') +
+      (I.rows.length ? `<table>${I.rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>` : '') +
+      (I.notes.length ? `<div class="inspNote">${I.notes.map(esc).join(' · ')}</div>` : '');
+  }
+  if (html !== el._html) { el.innerHTML = html; el._html = html; el.querySelector('.inspX').onclick = () => { st.inspect = null; drawInspect(m); }; }
+  el.hidden = false;
 }
 
 function drawPlayers(m) {

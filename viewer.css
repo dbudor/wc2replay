@@ -53,3 +53,20 @@ body.pview #side { display: none; }
 body.pview #view { cursor: default; }
 body.pview #view.drag { cursor: grabbing; }
 .drop[hidden], [hidden] { display: none !important; }
+/* click-to-inspect card (unitinfo.js) */
+.inspect { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.inspHead { display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 13px; }
+.inspX { background: none; border: 0; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.inspX:hover { color: var(--text); }
+.inspOwner { color: var(--muted); margin: 2px 0 4px; }
+.inspOwner i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.inspBar { position: relative; height: 15px; background: #1b1d22; border: 1px solid #3a3e48; border-radius: 3px; margin: 3px 0; overflow: hidden; }
+.inspBar b { position: absolute; left: 0; top: 0; bottom: 0; }
+.inspBar.prog b { background: #2f7a3a; }
+.inspBar span { position: relative; display: block; text-align: center; line-height: 15px; font-size: 11px; text-shadow: 0 0 2px #000; }
+.inspLbl { margin-top: 4px; color: var(--muted); }
+.inspect table { border-collapse: collapse; width: 100%; margin-top: 3px; }
+.inspect th { text-align: left; font-weight: normal; color: var(--muted); padding: 1px 6px 1px 0; white-space: nowrap; }
+.inspect td { text-align: right; padding: 1px 0; }
+.inspNote { color: var(--muted); margin-top: 3px; }
+.inspect.float { position: absolute; top: 10px; right: 10px; width: 250px; background: var(--panel); opacity: 0.95; z-index: 2; box-shadow: 0 2px 8px #0008; }
