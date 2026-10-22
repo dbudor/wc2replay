@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>War2 Replay Viewer</title>
+<link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+<header id="bar">
+  <strong class="brand">War2 replay</strong>
+  <label class="btn file">Game files…<input id="files" type="file" multiple accept=".exe,.mpq,.w2r,.pud,.pcap,.pcapng,.cap,.wav,.w2p,.w2c"></label>
+  <label id="rulesBox" title="Game rules: a capture does not say which War2Combat plugins the players had loaded. Auto tries the original rules and the Peon2k plugin (plugin/peon2k.w2p of your game folder first, if present) and keeps the one the capture's sync bytes agree with.">Rules <select id="rules">
+    <option value="auto">auto</option><option value="0">original</option><option value="256">Peon2k 0.2.2</option><option value="512">Peon2k 0.2.3</option>
+  </select></label>
+  <label id="peerBox" hidden title="The player whose view the replay takes (a capture holds every player's packets)">View of <select id="peer"></select></label>
+  <button id="save" class="btn" hidden title="Download the replay converted from the capture (a small .w2r file to share)">Save .w2r</button>
+  <span id="status" class="status">Pick <code>Warcraft II BNE.exe</code>, <code>War2Dat.mpq</code> (+ <code>War2Patch.mpq</code>), a <code>.w2r</code> replay or a <code>.pcapng</code>/<code>.pcap</code> capture of an IPX game and, for custom maps, its <code>.pud</code>. Files stay in this browser.</span>
+</header>
+<div id="controls" class="controls" hidden>
+  <button id="play" class="btn" title="Play / pause (space)">Play</button>
+  <button id="step" class="btn" title="Step one turn (.)">Step</button>
+  <select id="speed" title="Playback speed">
+    <option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="0">max</option>
+  </select>
+  <input id="seek" type="range" min="0" max="1" value="0" step="1" title="Seek (re-boots and fast-forwards when going back)">
+  <span id="clock" class="clock">turn 0 · tick 0 · 0:00</span>
+  <span class="audio">
+    <button id="mute" class="btn" title="Sound starts with your first click or key press">Sound on</button>
+    <input id="volume" type="range" min="0" max="100" value="70" title="Volume">
+    <label title="Unit selection / acknowledge voices of the recording player (its clicks; a replay has none of its own). The player view always plays the voices of its player."><input id="voices" type="checkbox"> voices</label>
+    <label><input id="music" type="checkbox"> music</label>
+  </span>
+  <span id="pvSlot" class="pvSlot"></span>
+</div>
+<main>
+  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div></div>
+  <aside id="side">
+    <canvas id="mini" width="192" height="192" title="Click or drag to move the view"></canvas>
+    <div class="row" id="viewRow">
+      <span id="viewOpts" class="viewOpts">
+        <label>Fog of war <select id="fog" title="View as player: keys 1-8; 9 = no fog"><option value="-1">all (no fog)</option></select></label>
+        <label title="See the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"> Player view</label>
+        <button id="follow" class="btn" hidden title="Follow that player's recorded camera, or its selection, again (F)">Follow</button>
+      </span>
+      <label title="HP bars (H)"><input id="hp" type="checkbox" checked> HP bars</label>
+      <label id="camBox" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
+    </div>
+    <div id="players"></div>
+    <div class="row logHead"><strong>Events</strong>
+      <label><input id="logSounds" type="checkbox"> sounds</label>
+      <label><input id="logVoices" type="checkbox" checked> voices</label>
+    </div>
+    <div id="log" class="log"></div>
+  </aside>
+</main>
+<script type="module" src="viewer.js"></script>
+</body>
+</html>
