@@ -10,6 +10,7 @@
 <header id="bar">
   <strong class="brand">War2 replay</strong>
   <label class="btn file">Game files…<input id="files" type="file" multiple accept=".exe,.mpq,.w2r,.pud,.pcap,.pcapng,.cap,.wav,.w2p,.w2c"></label>
+  <label id="listBox" hidden title="Replays and captures in the replays folder next to the viewer (serve.py --replays DIR picks another folder)">Replays <select id="replayList"></select></label>
   <label id="rulesBox" title="Game rules: a capture does not say which War2Combat plugins the players had loaded. Auto tries the original rules and the Peon2k plugin (plugin/peon2k.w2p of your game folder first, if present) and keeps the one the capture's sync bytes agree with.">Rules <select id="rules">
     <option value="auto">auto</option><option value="0">original</option><option value="256">Peon2k 0.2.2</option><option value="512">Peon2k 0.2.3</option>
   </select></label>
