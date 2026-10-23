@@ -70,11 +70,12 @@ Recording a game
 Capture the game's network traffic on one of the players' computers (or on a router between them), starting
 BEFORE the host clicks Start in the chat room (the start packet carries the game's random seed and slots):
 
-    tcpdump -i <interface> -w game.pcapng udp port 34754            (macOS / Linux)
-    Wireshark: capture filter "udp port 34754", save as .pcapng       (Windows)
+    tcpdump -i <interface> -w game.pcapng 'udp port 34754 or udp port 34755'        (macOS / Linux)
+    Wireshark: capture filter "udp port 34754 or udp port 34755", save as .pcapng    (Windows)
 
-34754 is the UDP port used by IPX-over-UDP wrappers such as ipxwrapper (War2Combat). The capture works for
-any player's point of view; the viewer lets you pick whose view (fog of war) to show.
+34754 is the UDP port of the game itself (War2Combat's IPX-over-UDP wrapper); 34755 carries the players' cameras
+and voices from the CamRec plugin (below). The capture works on any player's computer; the viewer lets you pick
+whose view (fog of war) to show. Drop the .pcapng on the page; "Save .w2r" makes a much smaller replay file.
 
 War2Combat plugin: Peon2k
 -------------------------
@@ -92,6 +93,18 @@ release from its base only once a rune hits a unit at exactly 50 hp or an invisi
 holy vision. Without the plugin file auto prefers the newest release: pick the version by hand if you know it.
 The vision builds of v0.2.2 / v0.2.3 (which let everybody see invisible units) and the peon2kdebug builds are not
 supported.
+
+Rejoining after a restart: extras/wsock32.dll (EXPERIMENTAL, not yet tested in a real game)
+-------------------------------------------------------------------------------------------
+War2Combat's network wrapper (wsock32.dll, "ipx2ip") gives every game process a new random IPX address, and each
+computer remembers the address it first saw for each other computer's IP:port. When one player restarts the game,
+the others keep sending to the old address and drop every packet for the new one, so the restarted player cannot
+join again until EVERY player restarts. extras/wsock32.dll is the same wrapper with one change: it recognises
+a sender by the address inside its packets, so a restarted player is simply a new peer.
+To try it: keep a copy of the original wsock32.dll (sha1 4c747543...), then put extras/wsock32.dll (sha1
+e05440fe...) into the War2Combat folder of EVERY player (the stale entries live on the computers that did not
+restart). Test with two computers first: start a game, quit and restart one of them, and join again without
+restarting the other. If anything misbehaves, put the original back.
 
 Recording the players' cameras and voices: CamRec plugin
 --------------------------------------------------------
