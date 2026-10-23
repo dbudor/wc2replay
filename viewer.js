@@ -8,7 +8,8 @@
 // screens.js (lobby intro and victory/defeat end screen from the MPQ's menu art).
 //
 // Captures (.pcapng/.pcap of an IPX-over-UDP game, ipxwrapper): converted in the browser with the host's view
-// by default; the "View of" selector re-converts from another player's view, "Save .w2r" downloads the result.
+// by default; "Save .w2r" downloads the result. The "View of" selector (re-convert against another machine's own
+// packets; the game is the same) is hidden unless the page has ?advanced.
 //
 // ---- sprites.js integration contract ----
 //   import('./sprites.js') (optional; the viewer falls back to owner-coloured boxes when it is missing or throws)
@@ -37,7 +38,7 @@
 // "Player view" (checkbox next to the Fog-of-war selector, key P) shows the replay as the fog-of-war player saw it:
 // the Classic 640x480 game screen from the user's MPQ (race panels, resource bar, minimap, selected-unit info,
 // command buttons, messages) scaled to the window, that player's fog and selection boxes (g_Selection[p]), a
-// camera that follows its selection (dragging the map releases it; Follow / F re-centres) and the sounds of its
+// camera that follows its selection (dragging the map releases it; Follow / L follows again) and the sounds of its
 // own clicks (selection / acknowledge voices with the original pickers, building sounds, work complete...).
 // The side panel is hidden meanwhile; the fog selector and the toggle move to the controls bar.
 //
@@ -45,9 +46,17 @@
 // Players who ran camrec.w2p broadcast their viewport and mouse (UDP 34755): a capture holds them, the plugin's own
 // camrec\*.w2c files can be dropped in as well, and a converted .w2r keeps them ('CAMR' chunk; Save .w2r).
 // Player view: the camera is that player's recorded viewport and its mouse is drawn with the game's cursor
-// (dragging releases it to the selection-following camera; Follow / F returns to the recording). Free view: each
+// (dragging releases it to the selection-following camera; Follow / L returns to the recording). Free view: each
 // shown player's viewport rectangle and cursor on the map and the minimap (the fog-of-war player, or everybody
 // when fog is "all"). "Cameras" (C) turns all of it off. Samples are shown at tick + ms within the tick.
+//
+// ---- watching one player (Fog of war set to a player) ----
+// Fog / F shows or hides that player's fog (the player stays picked: its cameras, sounds, messages, the player
+// view's screen). Follow / L keeps the free view centred on its recorded viewport (on its selection when it has
+// none), at the free view's own zoom; in the player view it follows the recording / selection as the player's
+// screen did. Dragging, pinching or the minimap release it. Microphones: none play at first; a player's "mic"
+// button in the players list picks it. "follows view" (on at first) plays only the watched player's microphone
+// instead; with fog "all" the picked ones play.
 //
 // ---- timing ----
 // One sim tick is one Game_TimedFrame; at 1x the viewer plays ticks at the game's own frame pace for the
@@ -63,9 +72,10 @@ import { parseCapture, convertCapture, CaptureError, crc32, withLocalQuit } from
 import { loadTileset } from './tileset.js';
 import { MapRenderer, FogTracker } from './render.js';
 import { readUnits, readPlayers, tickMs, soundNames, UNIT_NAMES, A } from './gamestate.js';
-import { GameAudio, isMusicFile, ALT_SOUND } from './audio.js';
+import { GameAudio, ALT_SOUND } from './audio.js';
 import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outcome, playerStats, GameTracker, OUTCOME_TEXT } from './screens.js';
-import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, trackGeometry, mouseTarget, loadCursor, isW2c } from './camrec.js';
+import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
+import { MicPlayer } from './micplay.js';
 import { pickUnit, unitRef, refAlive, unitInfo } from './unitinfo.js';
 import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visibleMessages, FRAME_W, FRAME_H, MAP_RECT, MINI_RECT } from './playerview.js';
 
@@ -73,13 +83,14 @@ import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visi
 const $ = id => document.getElementById(id);
 // game sound (audio.js): hook events -> WebAudio, only at 1x/2x and not while seeking
 const audio = new GameAudio();
-audio.bindControls({ mute: $('mute'), volume: $('volume'), voices: $('voices'), music: $('music') });
+const mic = new MicPlayer(audio);   // the players' microphones (CamRec)
+audio.bindControls({ volume: $('volume'), voiceVolume: $('voiceVol'), fxVolume: $('fxVol'), voices: $('voices') });
 const ui = { status: $('status'), controls: $('controls'), play: $('play'), step: $('step'), speed: $('speed'), seek: $('seek'),
   clock: $('clock'), view: $('view'), mini: $('mini'), fog: $('fog'), hp: $('hp'), players: $('players'), log: $('log'),
   logSounds: $('logSounds'), logVoices: $('logVoices'), drop: $('drop'), wrap: $('viewWrap'),
   peerBox: $('peerBox'), peer: $('peer'), save: $('save'), rules: $('rules'),
-  pview: $('pview'), follow: $('follow'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
-  camShow: $('camShow'), camBox: $('camBox'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect') };
+  pview: $('pview'), follow: $('follow'), fogBtn: $('fogBtn'), micLink: $('micLink'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
+  camShow: $('camShow'), camBox: $('camBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect') };
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
   capture: null, captureName: '', converted: null,
@@ -93,18 +104,25 @@ const st = {
   outroClosed: false,    // the outro was dismissed at this end of the replay
   // player view: art (MPQ), frame renderer, camera, per-player UI voice state and messages
   pv: { on: false, art: null, frame: null, cam: new PlayerCamera(), camRec: true, ui: null, messages: [], names: [], lastTick: -1, rect: null },
+  noFog: false,          // F: the watched player's fog hidden
+  free: { follow: false, cam: new PlayerCamera() },   // L in the free view: follow the watched player's camera
   cam: { tracks: new Map(), curBytes: [], cursors: [] },   // recorded cameras by player; Art\h_arrow.cur / o_arrow.cur
   stepClock: null,       // { from: g_TickCount before the last step, t } while playing (smooth camera time)
 };
 const setStatus = (msg, err = false) => { ui.status.textContent = msg; ui.status.classList.toggle('err', err); };
 
 // ---------------------------------------------------------------- War2Combat plugin rules (Peon2k)
-// The sim implements Peon2k's rule changes (src/lift/mod_peon2k.c) behind W2_PATCH_PEON2K_022 / _023. A capture does
-// not record which plugins the players had loaded, so the rules are chosen when the capture is converted: "auto"
-// converts with each candidate (the user's own plugin/peon2k.w2p first) and keeps the first whose run matches every
-// sync byte the capture carries. A .w2r keeps the rules it was converted with (MTCH), unless overridden here.
-const RULES = { 0: 'original rules', 256: 'Peon2k 0.2.2 rules', 512: 'Peon2k 0.2.3 rules' };
-const PLUGIN_BUILDS = { 0xefea1697: 0x100, 0x86b57ae2: 0x200 };   // CRC-32 of the released peon2k.w2p files
+// The sim implements Peon2k's rule changes (src/lift/mod_peon2k.c) behind W2_PATCH_PEON2K_022 / _023, + _FIX (0x400)
+// for the .1 releases, + _VIS (0x800) for their peon2kvision.w2p builds. A capture does not record which plugins the
+// players had loaded, so the rules are chosen when the capture is converted: "auto" converts with each candidate
+// (the user's own plugin/peon2k[vision].w2p first, then the newest releases) and keeps the first whose run matches
+// every sync byte the capture carries. Rules that only change scores or what an invisible unit's enemies see cannot
+// be told apart by the sync bytes: the game folder's plugin decides those. A .w2r keeps the rules it was converted
+// with (MTCH), unless overridden here.
+const RULES = { 0: 'original rules', 0x100: 'Peon2k 0.2.2 rules', 0x200: 'Peon2k 0.2.3 rules', 0x500: 'Peon2k 0.2.2.1 rules',
+  0xd00: 'Peon2k 0.2.2.1 vision rules', 0x600: 'Peon2k 0.2.3.1 rules', 0xe00: 'Peon2k 0.2.3.1 vision rules' };
+const PLUGIN_BUILDS = { 0xefea1697: 0x100, 0x86b57ae2: 0x200,   // CRC-32 of the released peon2k.w2p / peon2kvision.w2p files
+  0x85197383: 0x500, 0xa95308f6: 0xd00, 0x5b73c898: 0x600, 0x4f1681a2: 0xe00 };
 function pluginInfo(bytes, name) {
   const bits = PLUGIN_BUILDS[crc32(bytes)] || 0;
   let wav = null;                                  // the plugin's embedded PEON2K\ajmoo.wav (it writes it out at startup)
@@ -125,7 +143,7 @@ function ruleCandidates() {
   const v = ui.rules.value;
   if (v !== 'auto') return [+v];
   const first = picked.plugin && picked.plugin.bits ? [picked.plugin.bits] : [];
-  return [...new Set([...first, 0, 0x100, 0x200])];
+  return [...new Set([...first, 0, 0x600, 0xe00, 0x500, 0xd00, 0x200, 0x100])];
 }
 
 // ---------------------------------------------------------------- recorded cameras (CamRec)
@@ -137,12 +155,18 @@ function refreshCams() {
   for (const [p, tr] of st.cam.tracks) if (M && tr.start && tr.start.mapSize !== M) { st.cam.tracks.delete(p); st.cam.ignored.push(p); }   // another game's file
   if (picked.converted) picked.converted.w2r = withCamChunk(picked.converted.w2r, pk);   // Save .w2r keeps them
   ui.camBox.hidden = !st.cam.tracks.size;
+  st.mic = buildMicTracks(pk, st.cam.tracks);
+  mic.setTracks(st.mic, st.tickMs || 1000 / 30);
+  ui.micsBox.hidden = !mic.players.length;
 }
 function camNote() {
   const ign = st.cam.ignored && st.cam.ignored.length ? ` (ignored a camera of another map: player ${st.cam.ignored.map(p => p + 1).join(', ')})` : '';
   if (!st.cam.tracks.size) return ign.trim();
   const names = [...st.cam.tracks.keys()].sort((a, b) => a - b).map(p => st.pv.names[p] || `player ${p + 1}`);
-  return `recorded camera${names.length > 1 ? 's' : ''}: ${names.join(', ')}${ign}`;
+  const pn = p => st.pv.names[p] || `player ${p + 1}`, voices = mic.players.map(pn);
+  const noMic = [...(st.mic || new Map()).values()].filter(t => !t.blocks.length && t.info && t.info.state !== 2 && t.info.state !== 6)
+    .map(t => `${pn(t.player)}: microphone ${MIC_STATES[t.info.state] || t.info.state}`);
+  return `recorded camera${names.length > 1 ? 's' : ''}: ${names.join(', ')}${voices.length ? `; voices: ${voices.join(', ')}` : ''}${noMic.length ? ` (${noMic.join(', ')})` : ''}${ign}`;
 }
 // Game time (g_TickCount, fractional) for the recorded cameras: while playing, the ticks of the last step are
 // spread over the wall time they take, so the mouse moves smoothly between turns.
@@ -160,18 +184,17 @@ function cursorFor(p) {
 // ---------------------------------------------------------------- file picking
 async function addFiles(list) {
   await autoGame;                                  // game files found next to the page come first; picked ones override
-  let newCapture = null, onlyMusic = list.length > 0, onlyPlugin = false;
+  let newCapture = null, onlyPlugin = false;
   const onlyCam = list.length > 0 && list.every(f => /\.w2c$/i.test(f.name));
   for (const f of list) {
     const n = f.name.toLowerCase();
     const buf = () => f.arrayBuffer().then(b => new Uint8Array(b));
-    if (isMusicFile(n)) { audio.addMusicFile(f.name, await buf()); continue; }   // optional Music\*.WAV (CD install)
     if (n.endsWith('.w2c')) {                      // CamRec plugin file (camrec\*.w2c)
       const b = await buf();
       if (isW2c(b)) picked.camFiles.push(b); else setStatus(`${f.name}: not a CamRec .w2c file`, true);
       continue;
     }
-    onlyMusic = false; if (!n.endsWith('.w2p')) onlyPlugin = false;
+    if (!n.endsWith('.w2p')) onlyPlugin = false;
     if (n.endsWith('.exe')) picked.exe = await buf();
     else if (n === 'war2dat.mpq') picked.dat = await buf();
     else if (n === 'war2patch.mpq') picked.patch = await buf();
@@ -186,7 +209,6 @@ async function addFiles(list) {
     }
     else if (n.endsWith('.mpq') && !picked.dat) picked.dat = await buf();
   }
-  if (onlyMusic && st.session) return;
   if (onlyCam) {
     if (!st.session) { setStatus(`${picked.camFiles.length} camera file(s) loaded; now pick the replay or capture.`); return; }
     refreshCams(); setStatus(camNote() || 'These camera files hold no samples.', !st.cam.tracks.size); return;
@@ -199,7 +221,7 @@ async function addFiles(list) {
     return;
   }
   if (newCapture) fillPeers(newCapture);
-  ui.peerBox.hidden = !picked.capture;
+  ui.peerBox.hidden = !picked.capture || !new URLSearchParams(location.search).has('advanced');
   const missing = [!picked.exe && 'Warcraft II BNE.exe', !picked.dat && 'War2Dat.mpq', !picked.replay && !picked.capture && 'a .w2r replay or a capture'].filter(Boolean);
   if (missing.length) { setStatus(`Still needed: ${missing.join(', ')}.`); return; }
   try {
@@ -295,11 +317,11 @@ const autoGame = (async () => {
       setStatus('Loading the game files from the server…');
       const get = async u => new Uint8Array(await (await fetch(u)).arrayBuffer());
       [picked.exe, picked.dat, picked.patch] = await Promise.all([get(exe), get(dat), patch ? get(patch) : null]);
-      const plug = await findGameFile(dir, ['plugin/peon2k.w2p', 'plugin/Peon2k.w2p', 'plugin/PEON2K.W2P', 'Plugin/peon2k.w2p']);
-      if (plug) try { setPlugin(pluginInfo(await get(plug), 'plugin/peon2k.w2p')); } catch { /* optional */ }
+      const plug = await findGameFile(dir, ['plugin/peon2kvision.w2p', 'plugin/peon2k.w2p', 'plugin/Peon2k.w2p', 'plugin/PEON2K.W2P', 'Plugin/peon2k.w2p']);
+      if (plug) try { setPlugin(pluginInfo(await get(plug), decodeURIComponent(plug.pathname.replace(/^.*\/plugin\//i, 'plugin/')))); } catch { /* optional */ }
       const where = new URL(dir, location.href).pathname;
       st.gameDir = where;
-      setStatus(`Game files loaded from ${where} (Warcraft II BNE.exe, War2Dat.mpq${patch ? ', War2Patch.mpq' : ''}${picked.plugin ? ', plugin/peon2k.w2p' : ''}). Pick or drop a .w2r replay or a .pcapng/.pcap capture (custom maps: also its .pud).`);
+      setStatus(`Game files loaded from ${where} (Warcraft II BNE.exe, War2Dat.mpq${patch ? ', War2Patch.mpq' : ''}${picked.plugin ? ', ' + picked.plugin.name : ''}). Pick or drop a .w2r replay or a .pcapng/.pcap capture (custom maps: also its .pud).`);
       document.body.classList.add('game-auto');
       const lb = $('files').parentElement; if (lb.firstChild.nodeType === 3) lb.firstChild.nodeValue = 'Replay…';
     } catch { picked.exe = picked.dat = picked.patch = null; }
@@ -437,6 +459,7 @@ async function startSession(intro) {
   refreshCams();
   ui.fog.length = 1;
   for (const p of readPlayers(m)) ui.fog.add(new Option(`as player ${p.id + 1}${p.name ? ` (${p.name})` : ''}${p.id === m.r8(A.LocalPlayer) ? ' · recorder' : ''}`, p.id));
+  applyFog(); mic.picked.clear();   // a new replay: fog "all", no microphones picked
   ui.seek.max = Math.max(1, st.totalTurns - 1);
   ui.controls.hidden = false;
   ui.log.textContent = '';
@@ -469,7 +492,7 @@ function showScreen(kind) {
 }
 function closeScreen() {
   if (!st.screen) return;
-  if (st.screen.kind === 'outro') { st.outroClosed = true; if (st.screen.music) audio.musicTrack = -1; }
+  if (st.screen.kind === 'outro') st.outroClosed = true;
   st.screen = null;
 }
 const lobbyUp = () => !!(st.screen && st.screen.kind === 'intro');
@@ -497,11 +520,7 @@ function updateScreen() {
     key = `o${O.v}:${Math.min(2, t).toFixed(2)}`;
     if (key !== sc.key && st.art.outroOk)
       surf = renderOutro(st.art, O, t, `Showing ${O.name} - pick another player with "Fog of war"`);
-    if (key !== sc.key) {
-      sc.info = O;
-      const track = O.race + (O.outcome.kind === 'victory' ? 0xe : 0xc);   // HVICTORY/OVICTORY, HDEFEAT/ODEFEAT
-      sc.music = O.outcome.kind !== 'undecided' && audio.setScreenTrack(track);
-    }
+    if (key !== sc.key) sc.info = O;
   }
   if (key !== sc.key) {
     sc.key = key;
@@ -568,7 +587,10 @@ const createCanvas = (w, h) => { const c = document.createElement('canvas'); c.w
 // What audio.js needs: arena, viewed player (fog selector, -1 = all), the visible tiles, whether sound is on now.
 function audioEnv() {
   const v = st.view, pv = st.pv.on;
-  return { m: st.session.mem(), player: pv ? pvPlayer() : +ui.fog.value, playing: st.playing, pview: pv,
+  const player = pv ? pvPlayer() : +ui.fog.value;
+  // ownUi: the watched player's own voices / notices come from playerview.js UiVoices (every player has them);
+  // with fog "all" the recording machine's own ones play (the sim's hook events)
+  return { m: st.session.mem(), player, playing: st.playing, pview: pv, ownUi: pv || player >= 0,
     view: pv ? { x: st.pv.cam.x / 32, y: st.pv.cam.y / 32, w: MAP_RECT.w / 32, h: MAP_RECT.h / 32 }
       : { x: v.x / 32, y: v.y / 32, w: ui.view.width / v.scale / 32, h: ui.view.height / v.scale / 32 },
     enabled: !st.busy && (st.speed === 1 || st.speed === 2) };
@@ -580,9 +602,9 @@ function pvHandle(ev) {
   const out = st.pv.ui.handle(ev, m, st.tickMs, m.r8(A.LocalPlayer), st.pv.names);
   if (out.messages.length) { st.pv.messages.push(...out.messages); if (st.pv.messages.length > 300) st.pv.messages.splice(0, st.pv.messages.length - 200); }
   const env = audioEnv();
-  if (!st.pv.on || !env.enabled) return;
-  const p = env.player;
-  for (const x of out.sounds) if (x.player === p) audio.playUi(m.r8(A.PlayerRace + p), x.id);
+  if (!env.ownUi || !env.enabled) return;
+  const p = env.player;   // free view: notices always, select / acknowledge voices with the "voices" box
+  for (const x of out.sounds) if (x.player === p && (env.pview || x.kind === 'notify' || audio.settings.voices)) audio.playUi(m.r8(A.PlayerRace + p), x.id);
 }
 
 function stepTurn(log = true) {
@@ -629,12 +651,25 @@ function playPressed() {
 function stepPressed() { closeScreen(); setPlaying(false); stepTurn(); }
 ui.play.onclick = playPressed;
 ui.step.onclick = stepPressed;
+$('back10').onclick = () => skip10(-1);
+$('fwd10').onclick = () => skip10(1);
+// skip 10 s of game time (arrow keys and the -10s / +10s buttons)
+function skip10(dir) {
+  if (!st.session || st.busy || lobbyUp() && dir < 0) return;
+  const s = st.session, tpt = s.turn > 1 && s.tick > 0 ? s.tick / (s.turn - 1) : 1;   // average ticks per turn so far
+  const dturns = Math.max(1, Math.round(10000 / st.tickMs / tpt));
+  const target = Math.max(0, Math.min(st.totalTurns - 1, s.turn + dir * dturns));
+  ui.seek.value = target; seekTo(target);
+}
 ui.speed.onchange = () => { st.speed = +ui.speed.value; st.budget = 0; };
 ui.seek.oninput = () => { ui.clock.textContent = `seek to turn ${ui.seek.value}…`; };
 ui.seek.onchange = () => seekTo(+ui.seek.value);
+// the map's fog: the watched player's, unless F hid it
+const watched = () => +ui.fog.value;
+function applyFog() { st.renderer.fogPlayer = st.noFog ? -1 : watched(); updateWatchButtons(); }
 ui.fog.onchange = () => {
   if (st.pv.on && +ui.fog.value < 0) ui.fog.value = String(pvPlayer());   // the player view always has a player
-  st.renderer.fogPlayer = +ui.fog.value; st.pv.cam.reset(); st.pv.camRec = true; st.pv.frame && (st.pv.frame.shown = null);
+  applyFog(); st.pv.cam.reset(); st.pv.camRec = true; st.pv.frame && (st.pv.frame.shown = null);
   if (st.screen && st.screen.kind === 'outro') st.screen.t0 = performance.now();
 };
 // ---- player view on / off
@@ -650,25 +685,69 @@ function setPlayerView(on) {
   st.pv.on = on; ui.pview.checked = on;
   document.body.classList.toggle('pview', on);
   (on ? ui.pvSlot : ui.viewRow).prepend(ui.viewOpts);   // keep the selector + toggle reachable
-  if (on) ui.wrap.append(ui.inspect); else $('players').before(ui.inspect);   // the inspect card floats over the game screen
-  ui.inspect.classList.toggle('float', on);
+  placeInspect();
   if (on) {
     if (+ui.fog.value < 0) { ui.fog.value = String(pvPlayer()); }
-    st.renderer.fogPlayer = +ui.fog.value;
+    applyFog();
     st.pv.cam.reset(); if (st.pv.frame) st.pv.frame.shown = null;
   }
-  ui.follow.hidden = !on || pvFollowing();
+  updateWatchButtons();
   if (restore) {
     st.view.scale = st.freeCam.scale; centreOn(st.freeCam.x, st.freeCam.y);
-    if ([...ui.fog.options].some(o => o.value === st.freeCam.fog)) { ui.fog.value = st.freeCam.fog; st.renderer.fogPlayer = +ui.fog.value; }
+    if ([...ui.fog.options].some(o => o.value === st.freeCam.fog)) { ui.fog.value = st.freeCam.fog; applyFog(); }
   }
 }
-function pvFollow() { st.pv.cam.follow = true; st.pv.camRec = true; ui.follow.hidden = true; }
+// The inspect card floats over the game screen in the player view (which hides the side panel). On a phone it is
+// a sheet over the bottom of the free view instead (the side panel is below the fold), and in the player view,
+// whose 4:3 screen is short, the side panel stays below it and holds the card.
+const narrow = matchMedia('(max-width: 760px)');
+function placeInspect() {
+  const float = narrow.matches ? !st.pv.on : st.pv.on;
+  if (float) ui.wrap.append(ui.inspect); else $('players').before(ui.inspect);
+  ui.inspect.classList.toggle('float', float);
+}
+narrow.addEventListener('change', placeInspect);
+placeInspect();
+function pvFollow() { st.pv.cam.follow = true; st.pv.camRec = true; updateWatchButtons(); }
+function pvRelease() { st.pv.cam.follow = false; st.pv.camRec = false; updateWatchButtons(); }
 const pvRecTrack = () => camOn() && st.session ? st.cam.tracks.get(pvPlayer()) : null;
 const pvFollowing = () => st.pv.cam.follow && (st.pv.camRec || !pvRecTrack());
+const following = () => st.pv.on ? pvFollowing() : st.free.follow;
+function freeRelease() { if (st.free.follow) { st.free.follow = false; updateWatchButtons(); } }
+// F / L: hide the watched player's fog, follow its camera (nothing to do with fog "all")
+function toggleFog() { if (watched() < 0) return; st.noFog = !st.noFog; applyFog(); }
+function toggleFollow() {
+  if (watched() < 0) return;
+  if (st.pv.on) { if (pvFollowing()) pvRelease(); else pvFollow(); return; }
+  st.free.follow = !st.free.follow; updateWatchButtons();
+}
+function updateWatchButtons() {
+  const has = watched() >= 0, f = following();
+  ui.fogBtn.hidden = ui.follow.hidden = !has;
+  ui.fogBtn.classList.toggle('on', !st.noFog); ui.follow.classList.toggle('on', f);
+  ui.fogBtn.setAttribute('aria-pressed', String(!st.noFog)); ui.follow.setAttribute('aria-pressed', String(f));
+}
+// Free view following the watched player: its recorded viewport, else its selection (playerview.js PlayerCamera)
+function freeFollowStep(m, dt) {
+  const p = watched(), tr = camOn() ? st.cam.tracks.get(p) : null, c = tr && camAt(tr, camTime(), st.tickMs);
+  if (c) { const g = trackGeometry(tr); centreOn(c.vx * 32 + g.tilesW * 16, c.vy * 32 + g.tilesH * 16); return; }
+  const v = st.view, w = ui.view.width / v.scale, h = ui.view.height / v.scale, fc = st.free.cam;
+  fc.player = p; fc.placed = true; fc.follow = true; fc.x = v.x; fc.y = v.y;   // from where the view is now
+  const t = fc.target(m, p, w, h); if (!t) return;
+  const k = dt <= 0 ? 1 : 1 - Math.exp(-dt / 120), want = viewCentre();
+  centreOn(want.x + (t.x - want.x) * k, want.y + (t.y - want.y) * k);
+}
 ui.pview.onchange = () => setPlayerView(ui.pview.checked);
-ui.follow.onclick = pvFollow;
+ui.follow.onclick = toggleFollow;
+ui.fogBtn.onclick = toggleFog;
 ui.hp.onchange = () => { st.renderer.showHp = ui.hp.checked; };
+ui.mics.checked = audio.settings.mics !== false; ui.micVol.value = audio.settings.micVolume ?? 100;
+ui.mics.onchange = () => { audio.settings.mics = ui.mics.checked; audio.save(); if (!ui.mics.checked) mic.stopAll(); };
+ui.micVol.oninput = () => { audio.settings.micVolume = +ui.micVol.value; audio.save(); };
+ui.micLink.checked = audio.settings.micLink !== false;
+ui.micLink.onchange = () => { audio.settings.micLink = ui.micLink.checked; audio.save(); micFocus(); if (st.session) drawPlayers(st.session.mem()); };
+// "follows view": only the watched player's microphone (none with fog "all": then the picked ones)
+function micFocus() { mic.focus = ui.micLink.checked && st.session && watched() >= 0 ? watched() : -1; }
 ui.camShow.onchange = () => { st.pv.camRec = true; };
 window.addEventListener('keydown', e => {
   if (!st.session || e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
@@ -676,7 +755,8 @@ window.addEventListener('keydown', e => {
   else if (e.key === 'Escape' && st.inspect) { st.inspect = null; drawInspect(st.session.mem()); }
   else if (e.key === '.') stepPressed();
   else if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey && !lobbyUp()) setPlayerView(!st.pv.on);
-  else if ((e.key === 'f' || e.key === 'F') && st.pv.on && !e.ctrlKey && !e.metaKey) pvFollow();
+  else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFog();
+  else if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFollow();
   else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) { ui.hp.checked = !ui.hp.checked; ui.hp.onchange(); }
   else if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey && st.cam.tracks.size) { ui.camShow.checked = !ui.camShow.checked; ui.camShow.onchange(); }
   else if (e.key >= '1' && e.key <= '8' && !e.ctrlKey && !e.metaKey && !e.altKey) {   // view player 1..8 (if in the game)
@@ -688,12 +768,7 @@ window.addEventListener('keydown', e => {
     ui.fog.value = '-1'; ui.fog.onchange();
   }
   else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.ctrlKey && !e.metaKey && !e.altKey) {   // skip 10 s
-    e.preventDefault();
-    if (st.busy || lobbyUp() && e.key === 'ArrowLeft') return;
-    const s = st.session, tpt = s.turn > 1 && s.tick > 0 ? s.tick / (s.turn - 1) : 1;   // average ticks per turn so far
-    const dturns = Math.max(1, Math.round(10000 / st.tickMs / tpt));
-    const target = Math.max(0, Math.min(st.totalTurns - 1, s.turn + (e.key === 'ArrowLeft' ? -dturns : dturns)));
-    ui.seek.value = target; seekTo(target);
+    e.preventDefault(); skip10(e.key === 'ArrowLeft' ? -1 : 1);
   }
   else if (st.screen && st.screen.kind === 'outro' && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== 'Shift' && e.target.tagName !== 'SELECT') { e.preventDefault(); closeScreen(); }
 });
@@ -721,9 +796,9 @@ function frame(t) {
     if (st.session.ended) setPlaying(false);
   }
   if (st.session.ended && !st.busy && !st.screen && !st.outroClosed && st.tracker && st.match) showScreen('outro');
-  const env = audioEnv();
-  if (st.screen && st.screen.kind === 'outro' && st.screen.music) env.playing = true;
-  audio.frame(env);
+  micFocus();
+  mic.frame({ t: camTime(), active: st.playing && st.speed === 1 && !st.busy && !st.screen });
+  drawTalkers();
   draw();
 }
 
@@ -758,7 +833,26 @@ function centreOnLocal() {
   if (u) centreOn(u.x + 16 * u.w, u.y + 16 * u.h); else centreOn(mapPx() / 2, mapPx() / 2);
 }
 let drag = null;
+// touch: two fingers pinch-zoom the free view; a finger moving less than this is still a tap
+const pointers = new Map(), slop = e => e.pointerType === 'touch' ? 10 : 4;
+let pinch = null;
+function pinchStart() {
+  const [a, b] = [...pointers.values()], r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  const mx = ((a.x + b.x) / 2 - r.left) * d, my = ((a.y + b.y) / 2 - r.top) * d, v = st.view;
+  freeRelease();
+  pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, scale: v.scale, wx: v.x + mx / v.scale, wy: v.y + my / v.scale };
+  drag = null; ui.view.classList.remove('drag');
+}
+function pinchMove() {
+  const [a, b] = [...pointers.values()], r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1, v = st.view;
+  const mx = ((a.x + b.x) / 2 - r.left) * d, my = ((a.y + b.y) / 2 - r.top) * d;
+  v.scale = Math.max(0.1, Math.min(8, pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist));
+  v.x = pinch.wx - mx / v.scale; v.y = pinch.wy - my / v.scale; clampView(); st.viewWant = viewCentre();
+}
 ui.view.addEventListener('pointerdown', e => {
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 2 && st.session && !st.pv.on && !st.screen) { pinchStart(); return; }
+  if (pointers.size > 1 || pinch) return;
   if (lobbyUp()) {   // only its "Start replay" button does something
     const r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1, q = st.screen.rect, b = st.lobbyBtn;
     if (q && b) {
@@ -779,7 +873,7 @@ function pvPoint(e) {
 const inRect = (pt, R) => pt && pt.x >= R.x && pt.y >= R.y && pt.x < R.x + R.w && pt.y < R.y + R.h;
 function pvMini(pt) {
   const M = mapPx(), c = st.pv.cam;
-  c.follow = false; st.pv.camRec = false; ui.follow.hidden = false;
+  c.follow = false; st.pv.camRec = false; updateWatchButtons();
   c.centreOn(st.session.mem(), (pt.x - MINI_RECT.x) / MINI_RECT.w * M, (pt.y - MINI_RECT.y) / MINI_RECT.h * M);
 }
 function pvPointerDown(e) {
@@ -790,28 +884,37 @@ function pvPointerDown(e) {
   ui.view.setPointerCapture(e.pointerId); ui.view.classList.add('drag');
 }
 ui.view.addEventListener('pointermove', e => {
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch) { if (pointers.size === 2) pinchMove(); return; }
   if (!drag || !st.session) return;
   const d = window.devicePixelRatio || 1;
   if (drag.mini) { pvMini(pvPoint(e)); return; }
   if (drag.pv) {   // dragging the map releases the camera
     const k = st.pv.rect ? st.pv.rect.k : 1, dx = (e.clientX - drag.x) * d / k, dy = (e.clientY - drag.y) * d / k;
-    if (!drag.moved && Math.hypot(dx, dy) < 3) return;
-    drag.moved = true; st.pv.cam.follow = false; st.pv.camRec = false; ui.follow.hidden = false;
+    if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < slop(e)) return;
+    drag.moved = true; pvRelease();
     st.pv.cam.x = drag.vx - dx; st.pv.cam.y = drag.vy - dy; st.pv.cam.clamp(st.session.mem());
     return;
   }
-  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
-  drag.moved = true;
+  if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < slop(e)) return;
+  drag.moved = true; freeRelease();
   st.view.x = drag.vx - (e.clientX - drag.x) * d / st.view.scale; st.view.y = drag.vy - (e.clientY - drag.y) * d / st.view.scale; clampView(); st.viewWant = viewCentre();
 });
+function pointerGone(e) {
+  pointers.delete(e.pointerId);
+  if (pinch && !pointers.size) pinch = null;   // after a pinch, lifting the fingers is not a tap
+}
+ui.view.addEventListener('pointercancel', e => { pointerGone(e); drag = null; ui.view.classList.remove('drag'); });
 ui.view.addEventListener('pointerup', e => {
+  const pinched = !!pinch; pointerGone(e);
+  if (pinched) return;
   const was = drag; drag = null; ui.view.classList.remove('drag');
   if (!was || was.moved || was.mini || !st.session) return;
   const r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1;
   if (was.pv) {   // player view: frame point -> map pixel through the camera
     const pt = pvPoint(e); if (!inRect(pt, MAP_RECT)) return;
-    inspectAt(st.pv.lastView.x + pt.x - MAP_RECT.x, st.pv.lastView.y + pt.y - MAP_RECT.y, pvPlayer());
-  } else inspectAt(st.view.x + (e.clientX - r.left) * d / st.view.scale, st.view.y + (e.clientY - r.top) * d / st.view.scale, +ui.fog.value);
+    inspectAt(st.pv.lastView.x + pt.x - MAP_RECT.x, st.pv.lastView.y + pt.y - MAP_RECT.y, st.noFog ? -1 : pvPlayer());
+  } else inspectAt(st.view.x + (e.clientX - r.left) * d / st.view.scale, st.view.y + (e.clientY - r.top) * d / st.view.scale, st.renderer.fogPlayer);
 });
 ui.view.addEventListener('wheel', e => {
   if (!st.session || st.pv.on) return;   // the player view keeps the game's own scale
@@ -823,6 +926,7 @@ ui.view.addEventListener('wheel', e => {
   v.x = wx - mx / v.scale; v.y = wy - my / v.scale; clampView(); st.viewWant = viewCentre();
 }, { passive: false });
 function miniMove(e) {
+  freeRelease();
   const r = ui.mini.getBoundingClientRect(), M = mapPx();
   centreOn((e.clientX - r.left) / r.width * M, (e.clientY - r.top) / r.height * M);
 }
@@ -843,7 +947,7 @@ function drawPlayerView(ctx, W, H, m) {
   }
   const ticks = st.pv.lastTick < 0 || s.tick < st.pv.lastTick || s.tick - st.pv.lastTick > 400 ? -1 : s.tick - st.pv.lastTick;
   st.pv.lastTick = s.tick; st.pv.lastView = view;
-  const c = st.pv.frame.render({ m, p, renderer: st.renderer, fog: st.fog, view, selection: sel, counterFrames: ticks,
+  const c = st.pv.frame.render({ m, p, renderer: st.renderer, fog: st.fog, noFog: st.noFog, view, selection: sel, counterFrames: ticks,
     messages: visibleMessages(st.pv.messages, p, s.tick, st.tickMs) });
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   let k = Math.min(W / FRAME_W, H / FRAME_H);
@@ -864,7 +968,7 @@ function drawPlayerView(ctx, W, H, m) {
     ctx.drawImage(cur.cv, x + (rec.mx - cur.hx) * k, y + (rec.my - cur.hy) * k, cur.w * k, cur.h * k);
     ctx.restore();
   }
-  ui.follow.hidden = pvFollowing();
+  if (ui.follow.classList.contains('on') !== pvFollowing()) updateWatchButtons();
 }
 // Free view: the recorded viewports and mouse cursors of the shown players (fog player, or all).
 function drawCams(ctx, m, mctx, mk) {
@@ -901,7 +1005,9 @@ function draw() {
     updateClock();
     return;
   }
+  const dt = lastDraw ? Math.min(250, performance.now() - lastDraw) : 0;
   lastDraw = performance.now();
+  if (st.free.follow && watched() >= 0 && !st.screen) freeFollowStep(m, st.busy ? 0 : dt);
   clampView();
   st.renderer.draw(ctx, W, H, st.view, m, st.fog);
   { const iu = inspectedUnit(m); if (iu && !st.screen) inspectBox(ctx, m, iu, st.view.x, st.view.y, st.view.scale, 0, 0); }
@@ -943,7 +1049,7 @@ function inspectBox(ctx, m, u, vx, vy, s, ox, oy) {
 function drawInspect(m) {
   const esc = x => String(x).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
   const el = ui.inspect, r = st.inspect;
-  if (!r) { if (!el.hidden) { el.hidden = true; el.innerHTML = ''; } return; }
+  if (!r) { if (!el.hidden) { el.hidden = true; el.innerHTML = ''; el._html = ''; } return; }   // forget the cache: the same card may come back
   const alive = refAlive(m, r);
   let html;
   if (alive === 'gone') html = `<div class="inspHead"><span>${esc(st.inspectName || 'Unit')}</span><button class="inspX" title="Close (Esc)">×</button></div><div class="inspNote">no longer exists</div>`;
@@ -959,7 +1065,7 @@ function drawInspect(m) {
       (I.rows.length ? `<table>${I.rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>` : '') +
       (I.notes.length ? `<div class="inspNote">${I.notes.map(esc).join(' · ')}</div>` : '');
   }
-  if (html !== el._html) { el.innerHTML = html; el._html = html; el.querySelector('.inspX').onclick = () => { st.inspect = null; drawInspect(m); }; }
+  if (html !== el._html) { el.innerHTML = html; el._html = html; el.querySelector('.inspX').onclick = () => { st.inspect = null; drawInspect(st.session.mem()); }; }
   el.hidden = false;
 }
 
@@ -970,8 +1076,11 @@ function drawPlayers(m) {
     const c = st.tileset.rgb[p.colorIdx] || [128, 128, 128];
     const ps = playerStats(m, p.id);   // the game's running stats (g_Stat*), as on the end screen
     const oc = ended && st.tracker.players.includes(p.id) ? OUTCOME_TEXT[outcome(m, p.id, st.tracker.left).kind] : '';
+    const on = mic.audible(p.id), why = mic.focus >= 0 ? ' (mic follows view: clicking picks microphones by hand)' : '';
+    const mb = mic.chunks.has(p.id) && mic.chunks.get(p.id).length
+      ? ` <button class="micBtn${mic.talking.has(p.id) ? ' talk' : ''}${on ? ' on' : ''}" data-mic="${p.id}" aria-pressed="${on}" title="${on ? 'Stop listening to' : 'Listen to'} this player's microphone${why}">mic</button>` : '';
     html.push(`<div class="player${p.defeated ? ' out' : ''}"><span class="sw" style="background:rgb(${c})"></span>
-      <span class="nm">${esc(p.name || `Player ${p.id + 1}`)}</span><span class="meta">${p.raceName} · ${p.colorName}${p.ctrl ? ' · ' + p.ctrlName : ''}${p.defeated ? ' · defeated' : ''}${oc ? ' · ' + oc.replace('!', '') : ''}</span>
+      <span class="nm">${esc(p.name || `Player ${p.id + 1}`)}${mb}</span><span class="meta">${p.raceName} · ${p.colorName}${p.ctrl ? ' · ' + p.ctrlName : ''}${p.defeated ? ' · defeated' : ''}${oc ? ' · ' + oc.replace('!', '') : ''}</span>
       <span class="res"><span>gold ${p.gold}</span><span>lumber ${p.lumber}</span><span>oil ${p.oil}</span><span>food ${p.food}/${p.foodMax}</span>
       <span>units ${p.liveUnits}</span><span>buildings ${p.liveBldgs}</span></span>
       <span class="res stats"><span>score ${ps.score}</span><span>kills ${ps.kills}</span><span>razings ${ps.razed}</span>
@@ -980,6 +1089,26 @@ function drawPlayers(m) {
   ui.players.innerHTML = html.join('');
 }
 const esc = s => s.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+ui.players.addEventListener('click', e => {
+  const b = e.target.closest('[data-mic]'); if (!b) return;
+  if (mic.focus >= 0) {   // linked: switch to picking by hand, starting from what plays now
+    mic.picked = new Set([mic.focus]); ui.micLink.checked = false; ui.micLink.onchange();
+  }
+  mic.toggle(+b.dataset.mic); if (st.session) drawPlayers(st.session.mem());
+});
+// who is talking (over the map, both views): names in their colours
+function drawTalkers() {
+  const el = ui.talkers, ps = st.session ? [...mic.talking].sort((a, b) => a - b) : [];
+  const key = ps.map(p => mic.audible(p) ? p : `-${p}`).join(',');
+  if (key === el._key) return;
+  el._key = key; el.hidden = !ps.length;
+  const m = st.session && st.session.mem();
+  el.innerHTML = ps.map(p => {
+    const c = st.tileset.rgb[m.r8(A.PlayerColor + p)] || [200, 200, 200];
+    return `<span${mic.audible(p) ? '' : ' class="quiet" title="not listening (mic button in the players list)"'}><i style="background:rgb(${c.join(',')})"></i>${esc(st.pv.names[p] || `Player ${p + 1}`)}</span>`;
+  }).join('');
+}
+mic.onSpeech = (p, c) => appendLog([`<div class="k-mic"><span class="t">${fmtTime(Math.floor(c.t0) * st.tickMs)}</span>${esc(st.pv.names[p] || `Player ${p + 1}`)} talks (${c.dur.toFixed(1)} s)</div>`]);
 
 // ---------------------------------------------------------------- event log (hook ring, w2hooks.h)
 const HK = { SOUND: 1, VOICE_SELECT: 2, VOICE_ACK: 3, STATUS_MSG: 4, MSG_TIMED: 5, STATUS_LINE: 6, ALERT: 8, MUSIC: 12 };
@@ -1004,6 +1133,9 @@ function logEvents(evs) {
     }
     lines.push(`<div class="k-${cls}"><span class="t">${fmtTime(e.tick * st.tickMs)}</span>${esc(text)}</div>`);
   }
+  appendLog(lines);
+}
+function appendLog(lines) {
   if (!lines.length) return;
   const atBottom = ui.log.scrollTop + ui.log.clientHeight >= ui.log.scrollHeight - 4;
   ui.log.insertAdjacentHTML('beforeend', lines.join(''));

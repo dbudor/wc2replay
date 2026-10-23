@@ -253,7 +253,7 @@ export function convertCapture(cap, { peer = null, pud = null, pudName = 'map.pu
   for (let pe = 0; pe < 8; pe++) m.u8(peers.includes(pe) ? 2 : 0);
   for (let pe = 0; pe < 8; pe++) m.u8(peers.includes(pe) ? S0 : 0);
   for (let pe = 0; pe < 8; pe++) m.bytes(addr.get(pe) || new Uint8Array(16));
-  m.u8((S0 + outstanding) & 0xff, outstanding, 2, 0).u32(1 | (rules & 0x300));   // w2_patches: WarLatency + plugin rules
+  m.u8((S0 + outstanding) & 0xff, outstanding, 2, 0).u32(1 | (rules & 0xf00));   // w2_patches: WarLatency + plugin rules (W2_PATCH_PEON2K)
   m.u8(pending.length);
   for (const p of pending) { const b = new Uint8Array(8); b.set(p.subarray(0, 8)); m.bytes(b); }
   m.bytes(new Uint8Array(8 * (4 - pending.length)));

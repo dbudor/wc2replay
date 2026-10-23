@@ -17,8 +17,8 @@ select { background: #2b2e36; color: var(--text); border: 1px solid #3a3e48; bor
 #seek { flex: 1; min-width: 120px; accent-color: var(--accent); }
 .clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 220px; }
 .audio { display: flex; gap: 8px; align-items: center; }
-#volume { width: 80px; accent-color: var(--accent); }
-#mute.off { color: var(--muted); }
+#volume, #voiceVol, #fxVol { width: 70px; accent-color: var(--accent); vertical-align: middle; }
+.audio label { white-space: nowrap; }
 main { flex: 1; display: flex; min-height: 0; }
 #viewWrap { flex: 1; position: relative; min-width: 0; background: #000; }
 #view { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; image-rendering: pixelated; touch-action: none; }
@@ -42,12 +42,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .log .k-snd { color: #8fa6c8; }
 .log .k-voice { color: #a8c88f; }
 .log .k-alert { color: var(--bad); }
-@media (max-width: 760px) {
-  main { flex-direction: column; }
-  #viewWrap { min-height: 55vh; }
-  #side { width: 100%; border-left: 0; border-top: 1px solid var(--line); }
-  #mini { width: 160px; }
-}
+.log .k-mic { color: #e0b0e8; }
 .viewOpts, .pvSlot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 body.pview #side { display: none; }
 body.pview #view { cursor: default; }
@@ -70,3 +65,51 @@ body.pview #view.drag { cursor: grabbing; }
 .inspect td { text-align: right; padding: 1px 0; }
 .inspNote { color: var(--muted); margin-top: 3px; }
 .inspect.float { position: absolute; top: 10px; right: 10px; width: 250px; background: var(--panel); opacity: 0.95; z-index: 2; box-shadow: 0 2px 8px #0008; }
+/* phones and other small screens: the page scrolls; the view takes most of the screen and the side panel
+   follows below it (portrait), or the bars scroll away above a full-screen view (landscape) */
+@media (max-width: 760px), (max-height: 500px) {
+  body { height: auto; min-height: 100%; }
+  #bar, .controls { gap: 6px 8px; padding: 6px max(8px, env(safe-area-inset-left)); }
+  .brand { display: none; }
+  .status { min-width: 0; flex-basis: 100%; font-size: 12px; }
+  .clock { min-width: 0; font-size: 12px; }
+  .btn { padding: 7px 12px; }
+  select { padding: 6px 4px; }
+  input[type=checkbox] { width: 18px; height: 18px; vertical-align: -4px; }
+  label { white-space: nowrap; }
+}
+@media (max-width: 760px) {
+  main { flex-direction: column; flex: none; }
+  #viewWrap { height: 62svh; flex: none; }
+  body.pview #viewWrap { height: auto; aspect-ratio: 4 / 3; max-height: 75svh; }   /* the game's 640x480 screen */
+  #seek { order: 10; flex-basis: 100%; height: 28px; }
+  .audio { flex-wrap: wrap; }
+  #side { width: 100%; border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  #mini { width: 50%; max-width: 220px; }
+  body.pview #side { display: flex; }      /* the player view has its own minimap; keep the card, players and events */
+  body.pview #mini { display: none; }
+  #inspect { order: -1; }                  /* player view: the tapped unit's card right below the screen */
+  .inspect { font-size: 13px; }
+  .inspect.float { top: auto; right: 6px; left: 6px; bottom: 6px; width: auto; max-height: 45%; overflow-y: auto; }
+  #volume, #voiceVol, #fxVol, #micVol { width: 56px; }
+  .inspX { font-size: 22px; padding: 0 6px; }
+  .log { flex: none; max-height: 40svh; }
+  .log div { white-space: normal; }
+}
+@media (max-height: 500px) and (min-width: 761px) {
+  main { flex: none; height: 100svh; }
+  #side { width: 240px; padding: 6px; }
+}
+/* microphones (CamRec): per-player button in the players list, talking names over the map */
+#micVol { width: 70px; accent-color: var(--accent); vertical-align: middle; }
+.micBtn { font: 11px system-ui, sans-serif; margin-left: 6px; padding: 0 5px; border-radius: 8px; border: 1px solid #3a3e48; background: #2b2e36; color: var(--muted); cursor: pointer; vertical-align: 1px; }
+.micBtn.talk { background: #3d6b3a; color: #fff; border-color: #5aa055; }
+.micBtn.on { color: #fff; border-color: #6a8fd0; background: #2f4670; }
+.micBtn.talk:not(.on) { background: #2b3a2a; color: #9fc49a; border-style: dashed; }
+.talkers span.quiet { opacity: .55; }
+.btn.tog:not(.on) { opacity: .6; }
+.btn.tog.on { border-color: #6a8fd0; }
+.talkers { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-width: 90%; z-index: 2; pointer-events: none; }
+.talkers span { background: #000b; color: #fff; border-radius: 12px; padding: 2px 10px 2px 6px; font-size: 13px; }
+.talkers i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; box-shadow: 0 0 0 2px #fff4; }
+@media (max-width: 760px) { #micVol { display: none; } }

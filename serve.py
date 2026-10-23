@@ -11,7 +11,7 @@ import http.server, json, os, socketserver, sys, threading, urllib.parse, webbro
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAME_FILES = ('warcraft ii bne.exe', 'war2dat.mpq', 'war2patch.mpq')
-PLUGIN_FILES = ('peon2k.w2p',)
+PLUGIN_FILES = ('peon2k.w2p', 'peon2kvision.w2p')
 REPLAY_EXT = ('.w2r', '.pcapng', '.pcap', '.cap', '.w2c', '.pud')
 
 def list_replays(root, depth=2):
