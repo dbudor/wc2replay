@@ -10,6 +10,11 @@
 //          s16 minimap rect[4], u32 SyncRng, u16 time[6], char map[32]
 //   samples: +16 u16 n, u16 0, n x {u32 tick, u16 ms since that tick began, u8 view x, u8 view y, s16 mouse x, y}
 //   end: +16 u32 tick
+//   micinfo (4): +16 u8 state, u8 codec (1 = IMA ADPCM), u16 rate, u16 block samples, u16 flags (1 gate, 2 broadcast,
+//          4 silent), u32 peak level, u32 blocks, u32 dropped, char device[32]
+//   audio (5): +16 u32 tick, u16 ms, u16 flags (1 speech starts, 2 speech ends), u32 sample index (the plugin's
+//          microphone clock), u16 n, s16 ADPCM predictor, u8 step index, u8 0, u16 0, then (n + 1) / 2 bytes of 4-bit
+//          IMA ADPCM, first sample in the low nibble. Each block decodes alone (its own start state).
 // Tick = g_TickCount, the same counter the replay advances, so a sample belongs at tick + ms / tickMs.
 import { udpDatagrams } from './pcap.js';
 
@@ -87,6 +92,14 @@ export function parsePacket(p) {
     for (let i = 0, o = 20; i < n; i++, o += 12)
       d.samples.push([dv.getUint32(o, true), dv.getUint16(o + 4, true), p[o + 6], p[o + 7], dv.getInt16(o + 8, true), dv.getInt16(o + 10, true)]);
   } else if (d.kind === 3 && p.length >= 20) d.endTick = dv.getUint32(16, true);
+  else if (d.kind === 4 && p.length >= 68)
+    d.mic = { state: p[16], codec: p[17], rate: dv.getUint16(18, true), block: dv.getUint16(20, true), flags: dv.getUint16(22, true),
+      peak: dv.getUint32(24, true), blocks: dv.getUint32(28, true), drops: dv.getUint32(32, true), device: dec.decode(p.subarray(36, 68)).replace(/\0.*$/s, '') };
+  else if (d.kind === 5 && p.length >= 36) {
+    const n = dv.getUint16(28, true), flags = dv.getUint16(22, true);
+    d.audio = { tick: dv.getUint32(16, true), ms: dv.getUint16(20, true), start: !!(flags & 1), end: !!(flags & 2),
+      sample: dv.getUint32(24, true), n, pred: dv.getInt16(30, true), index: Math.min(88, p[32]), data: p.subarray(36, 36 + ((n + 1) >> 1)) };
+  }
   return d;
 }
 
@@ -157,4 +170,78 @@ export function loadCursor(bytes, rgb) {
     px[4 * i] = r; px[4 * i + 1] = g; px[4 * i + 2] = b; px[4 * i + 3] = 255;
   }
   return { hx, hy, w, h, px };
+}
+
+// ---------------------------------------------------------------- microphone (camrec.c, micdsp.h)
+export const MIC_STATES = ['off', 'starting', 'recording', 'unavailable', 'no device', 'lost', 'stopped'];
+export const MIC_RATE = 16000;
+const IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88, 97,
+  107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963, 1060,
+  1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132,
+  7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767];
+const IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
+// One block (IMA ADPCM, low nibble first, from its own start state) into out[off..off+n) as -1..1 floats.
+export function adpcmDecode(a, out, off = 0) {
+  let pred = a.pred, index = a.index;
+  for (let i = 0; i < a.n; i++) {
+    const byte = a.data[i >> 1] || 0, code = i & 1 ? byte >> 4 : byte & 15;
+    const step = IMA_STEP[index]; let vp = step >> 3;
+    if (code & 4) vp += step; if (code & 2) vp += step >> 1; if (code & 1) vp += step >> 2;
+    pred += code & 8 ? -vp : vp;
+    if (pred > 32767) pred = 32767; else if (pred < -32768) pred = -32768;
+    index += IMA_INDEX[code]; if (index < 0) index = 0; else if (index > 88) index = 88;
+    out[off + i] = pred / 32768;
+  }
+}
+// One microphone track per player: the session of that player's camera track when there is one (the same game),
+// else the session with the most audio. track = { player, session, info (last micinfo), blocks (by sample index) }
+export function buildMicTracks(packets, camTracks = new Map()) {
+  const by = new Map();
+  for (const raw of packets) {
+    if (raw[5] !== 4 && raw[5] !== 5) continue;
+    const d = parsePacket(raw), k = `${d.player}:${d.session}`;
+    let s = by.get(k); if (!s) by.set(k, s = { player: d.player, session: d.session, info: null, infoSeq: -1, blocks: new Map() });
+    if (d.mic && d.seq >= s.infoSeq) { s.info = d.mic; s.infoSeq = d.seq; }
+    if (d.audio && d.audio.n) s.blocks.set(d.audio.sample, d.audio);
+  }
+  const tracks = new Map();
+  for (const s of by.values()) {
+    const cam = camTracks.get(s.player);
+    if (cam && cam.session !== s.session) continue;
+    const cur = tracks.get(s.player);
+    if (!cur || s.blocks.size > cur.blocks.length)
+      tracks.set(s.player, { player: s.player, session: s.session, info: s.info, blocks: [...s.blocks.values()].sort((a, b) => a.sample - b.sample) });
+  }
+  for (const [p, t] of tracks) if (!t.blocks.length && !t.info) tracks.delete(p);
+  return tracks;
+}
+// The track as playable chunks: consecutive blocks on the microphone clock, starting at the game time of their
+// first block (tick + ms; a lag stall's ms past the tick is clamped, so speech during a stall starts where the game
+// stood) and never before the previous chunk ends. Long speech (or a recording without the voice gate) is cut
+// into MIC_CHUNK_S pieces, each `cont`inuing the previous one. chunk = { t0 (ticks), dur (s), blocks, n, cont }
+export const MIC_CHUNK_S = 30;
+export function micChunks(track, tickMs) {
+  const out = []; let cur = null;
+  const T = b => b.tick + Math.min(b.ms, tickMs * 0.999) / tickMs;
+  for (const b of track.blocks) {
+    const contiguous = cur && b.sample === cur.end && !b.start;
+    const late = cur && T(b) > cur.t0 + (b.sample - cur.sample0) / MIC_RATE * 1000 / tickMs + 300 / tickMs;   // the game ran on without audio
+    if (!contiguous || late) {
+      const prevEnd = cur ? cur.t0 + cur.dur * 1000 / tickMs : -Infinity;
+      cur = { t0: Math.max(T(b), prevEnd), dur: 0, blocks: [], n: 0, sample0: b.sample, end: b.sample, cont: null };
+      out.push(cur);
+    } else if (cur.dur >= MIC_CHUNK_S) {
+      const prev = cur;
+      cur = { t0: prev.t0 + prev.dur * 1000 / tickMs, dur: 0, blocks: [], n: 0, sample0: b.sample, end: b.sample, cont: prev };
+      out.push(cur);
+    }
+    cur.blocks.push(b); cur.n += b.n; cur.end = b.sample + b.n; cur.dur = cur.n / MIC_RATE;
+  }
+  return out;
+}
+// A chunk's samples (-1..1).
+export function micChunkPcm(chunk) {
+  const out = new Float32Array(chunk.n); let o = 0;
+  for (const b of chunk.blocks) { adpcmDecode(b, out, o); o += b.n; }
+  return out;
 }

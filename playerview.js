@@ -436,7 +436,8 @@ export class PlayerFrame {
       if (d) this.shown[i] += Math.trunc(d / 16) + (d > 0 ? 1 : -1);
     }
   }
-  // Render the whole frame. o: { m, p, tileset, renderer, fog, view:{x,y}, selection, messages, nowTick, tickMs }
+  // Render the whole frame. o: { m, p, tileset, renderer, fog, noFog (draw the map unfogged), view:{x,y}, selection,
+  // messages, nowTick, tickMs }
   render(o) {
     const { m, p } = o, art = this.art, F = art.fonts;
     const race = m.r8(A.PlayerRace + p) === 1 ? 1 : 0, tileset = m.r8(A.Tileset) & 3;
@@ -538,7 +539,7 @@ export class PlayerFrame {
     // ---- map viewport, minimap
     const R = o.renderer, mc = this.mapCanvas, mctx = mc.getContext('2d');
     const showHp = R.showHp, fp = R.fogPlayer;
-    R.showHp = false; R.fogPlayer = p;
+    R.showHp = false; R.fogPlayer = o.noFog ? -1 : p;
     R.draw(mctx, MAP_RECT.w, MAP_RECT.h, { x: o.view.x, y: o.view.y, scale: 1 }, m, o.fog);
     R.drawSelection(mctx, { x: o.view.x, y: o.view.y, scale: 1 }, m, p, sel, MAP_RECT.w, MAP_RECT.h);
     const mini = R.drawMinimap(m, o.fog);

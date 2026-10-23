@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>War2 Replay Viewer</title>
 <link rel="stylesheet" href="viewer.css">
 </head>
@@ -11,8 +11,9 @@
   <strong class="brand">War2 replay</strong>
   <label class="btn file">Game files…<input id="files" type="file" multiple accept=".exe,.mpq,.w2r,.pud,.pcap,.pcapng,.cap,.wav,.w2p,.w2c"></label>
   <label id="listBox" hidden title="Replays and captures in the replays folder next to the viewer (serve.py --replays DIR picks another folder)">Replays <select id="replayList"></select></label>
-  <label id="rulesBox" title="Game rules: a capture does not say which War2Combat plugins the players had loaded. Auto tries the original rules and the Peon2k plugin (plugin/peon2k.w2p of your game folder first, if present) and keeps the one the capture's sync bytes agree with.">Rules <select id="rules">
+  <label id="rulesBox" title="Game rules: a capture does not say which War2Combat plugins the players had loaded. Auto tries the original rules and the Peon2k releases (plugin/peon2kvision.w2p or peon2k.w2p of your game folder first, if present) and keeps the one the capture's sync bytes agree with. Score-only and vision-only differences cannot be detected: the game folder's plugin decides, or pick here.">Rules <select id="rules">
     <option value="auto">auto</option><option value="0">original</option><option value="256">Peon2k 0.2.2</option><option value="512">Peon2k 0.2.3</option>
+    <option value="1280">Peon2k 0.2.2.1</option><option value="3328">Peon2k 0.2.2.1 vision</option><option value="1536">Peon2k 0.2.3.1</option><option value="3584">Peon2k 0.2.3.1 vision</option>
   </select></label>
   <label id="peerBox" hidden title="The player whose view the replay takes (a capture holds every player's packets)">View of <select id="peer"></select></label>
   <button id="save" class="btn" hidden title="Download the replay converted from the capture (a small .w2r file to share)">Save .w2r</button>
@@ -20,29 +21,33 @@
 </header>
 <div id="controls" class="controls" hidden>
   <button id="play" class="btn" title="Play / pause (space)">Play</button>
+  <button id="back10" class="btn" title="Back 10 s (←)">−10s</button>
   <button id="step" class="btn" title="Step one turn (.)">Step</button>
+  <button id="fwd10" class="btn" title="Forward 10 s (→)">+10s</button>
   <select id="speed" title="Playback speed">
     <option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="0">max</option>
   </select>
   <input id="seek" type="range" min="0" max="1" value="0" step="1" title="Seek (re-boots and fast-forwards when going back)">
   <span id="clock" class="clock">turn 0 · tick 0 · 0:00</span>
   <span class="audio">
-    <button id="mute" class="btn" title="Sound starts with your first click or key press">Sound on</button>
-    <input id="volume" type="range" min="0" max="100" value="70" title="Volume">
-    <label title="Unit selection / acknowledge voices of the recording player (its clicks; a replay has none of its own). The player view always plays the voices of its player."><input id="voices" type="checkbox"> voices</label>
-    <label><input id="music" type="checkbox"> music</label>
+    <label title="Volume. Sound starts with your first click or key press">vol <input id="volume" type="range" min="0" max="100" value="70"></label>
+    <label title="Unit voices: selection / acknowledge (and, in the player view, its notices). The checkbox: in the free view, also the selection / acknowledge voices of the Fog-of-war player's clicks (of the recording machine's player with fog "all"); the player view always plays them."><input id="voices" type="checkbox"> voices <input id="voiceVol" type="range" min="0" max="100" value="100" title="Voice volume"></label>
+    <label title="Sound effects: combat, buildings, spells...">fx <input id="fxVol" type="range" min="0" max="100" value="100"></label>
+    <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> mics <input id="micVol" type="range" min="0" max="200" value="100" title="Microphone volume"></label>
+      <label title="Listen only to the player picked in Fog of war (keys 1-8); with fog &quot;all&quot;, to the mics picked in the players list"><input id="micLink" type="checkbox" checked> follows view</label></span>
   </span>
   <span id="pvSlot" class="pvSlot"></span>
 </div>
 <main>
-  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div></div>
+  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div><div id="talkers" class="talkers" hidden></div></div>
   <aside id="side">
     <canvas id="mini" width="192" height="192" title="Click or drag to move the view"></canvas>
     <div class="row" id="viewRow">
       <span id="viewOpts" class="viewOpts">
         <label>Fog of war <select id="fog" title="View as player: keys 1-8; 9 = no fog"><option value="-1">all (no fog)</option></select></label>
         <label title="See the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"> Player view</label>
-        <button id="follow" class="btn" hidden title="Follow that player's recorded camera, or its selection, again (F)">Follow</button>
+        <button id="fogBtn" class="btn tog on" hidden aria-pressed="true" title="Show or hide this player's fog of war; the view stays on this player (F)">Fog</button>
+        <button id="follow" class="btn tog" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)">Follow</button>
       </span>
       <label title="HP bars (H)"><input id="hp" type="checkbox" checked> HP bars</label>
       <label id="camBox" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>

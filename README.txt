@@ -50,16 +50,20 @@ recording player).
 Controls: Play/Pause, Step (one network turn), speed, timeline seek, drag to scroll, wheel to zoom, click
 the minimap, fog of war as any player.
 Keys: Space play/pause, . step one turn, Left/Right skip 10 s back/forward, 1-8 view as player 1-8,
-9 no fog, P toggle player view (that player's fog, selection, camera, UI and voices), F re-follow the
-selection in player view, H toggle HP bars, Esc close the unit card.
+9 no fog, P toggle player view (that player's fog, selection, camera, UI and voices). With a player picked:
+F fog on/off (the view stays on that player), L follow that player's camera on/off (its recorded screen, else its
+selection; dragging the map or the minimap stops it). H toggle HP bars, Esc close the unit card.
 Click a unit or building on the map (free or player view) for its stats, as the game's status panel has them, for
 any player: armor, damage, range, sight with upgrade bonuses, speed, magic, current order, a worker's load, a
 transport's cargo, spell timers; construction and training / research progress with the time left; gold or oil
 left in a mine, food grown/used at a farm, a town hall's production rates. The card follows the unit as it plays.
-Sound plays at 1x and 2x speed (positional, as the game does for the viewed player); the "voices" box adds unit
-selection/acknowledge voices. The game's palette animations (water, shores, ship wakes) run as in the game.
-Battle.net Edition's music was CD audio and is not in War2Dat.mpq; if you have the tracks as HUMAN1.WAV ... ORC6.WAV
-you can drop them in with the other files and tick "music".
+Phones and tablets: tap a unit for its card (a sheet over the bottom of the map; close it with x), drag to
+scroll, pinch to zoom, -10s / +10s buttons for the arrow keys. In portrait the players and events are below the
+map; the player view shows the game's 4:3 screen with the card under it. Sound starts on the first tap.
+Sound plays at 1x and 2x speed (positional, as the game does for the viewed player). Sliders: "vol" (master),
+"voices" (unit voices; its box also plays the Fog-of-war player's selection/acknowledge voices in the free view)
+and "fx" (everything else); "mics" has its own. There is no music (Battle.net Edition's music was CD audio).
+The game's palette animations (water, shores, ship wakes) run as in the game.
 
 Recording a game
 ----------------
@@ -74,33 +78,51 @@ any player's point of view; the viewer lets you pick whose view (fog of war) to 
 
 War2Combat plugin: Peon2k
 -------------------------
-Games played with the Peon2k plugin (github.com/dbudor/Peon2k, peon2k.w2p v0.2.2 or v0.2.3) replay with its rules.
+Games played with the Peon2k plugin (github.com/dbudor/Peon2k: peon2k.w2p v0.2.2, v0.2.3, v0.2.2.1, v0.2.3.1, and
+peon2kvision.w2p of v0.2.2.1 / v0.2.3.1) replay with its rules.
 A capture does not say which plugins the players had loaded, so the "Rules" selector defaults to auto: the capture
 is converted with the original rules and with each Peon2k version, and the one whose game agrees with every sync
-byte in the capture is kept (the status line says which). If your War2 folder has plugin/peon2k.w2p, serve.py serves
+byte in the capture is kept (the status line says which). If your War2 folder has plugin/peon2k.w2p (or
+plugin/peon2kvision.w2p), serve.py serves
 it too: auto then tries that version first, and bloodlusted knights and paladins shout its "ajmoo" (you can also
 drop the .w2p onto the page). Notes: a Peon2k rule that never changed anything in a game (no rune, tanker,
-polymorph... ) cannot be detected from the capture; v0.2.2 and v0.2.3 differ only once a tanker catches fire.
-The peon2kvision/peon2kdebug builds are not supported.
+polymorph... ) cannot be detected from the capture; v0.2.2 and v0.2.3 differ only once a tanker catches fire, a .1
+release from its base only once a rune hits a unit at exactly 50 hp or an invisible death knight casts unholy armor
+(its scores differ too, but scores are not in the capture), and a vision build from the plain one once someone casts
+holy vision. Without the plugin file auto prefers the newest release: pick the version by hand if you know it.
+The vision builds of v0.2.2 / v0.2.3 (which let everybody see invisible units) and the peon2kdebug builds are not
+supported.
 
-Recording the players' cameras: CamRec plugin
-----------------------------------------------
+Recording the players' cameras and voices: CamRec plugin
+--------------------------------------------------------
 plugin/camrec.w2p is a War2Combat plugin. Copy it into the plugin\ folder of every player's War2Combat install.
 
-During a game it records that player's viewport and mouse. It broadcasts them on the network (UDP port 34755), so
-your capture holds every player who ran it. It also writes camrec\<date>-<time>-p<N>.w2c into the game folder.
-The game itself is not affected, and players without the plugin can join as usual.
+During a game it records that player's viewport, mouse and, in multiplayer games, microphone (only while someone
+talks). It broadcasts them on the network (UDP port 34755), so your capture holds every player who ran it. It also
+writes camrec\<date>-<time>-p<N>.w2c into the game folder. The game itself is not affected, and players without
+the plugin can join as usual.
+
+Microphone: everyone in the game should know they are recorded; the plugin says so with a game message
+("CamRec: recording microphone (...)") a moment after the game starts. camrec.ini next to the game's exe (made on
+the first game) has the settings: mic=0 turns recording off, mic_device=part-of-a-name picks the microphone
+(camrec\mic-devices.txt lists them), mic_broadcast=0 keeps your voice off the network (file only). If the message
+says the microphone is silent, check it is not muted and that Windows allows desktop apps to use the microphone.
 
 In the viewer:
 * the status line lists the recorded cameras;
 * in the Player view the camera follows that player's own screen and shows their mouse cursor. Drag the map to look
-  around; Follow / F goes back to the recording;
+  around; Follow / L goes back to the recording;
 * in the free view each player's viewport and cursor are drawn on the map and minimap (the fog-of-war player, or
   everyone when fog is "all");
-* "Cameras" (key C) turns all of this off.
+* "Cameras" (key C) turns all of this off;
+* voices play at 1x speed, at the game time they were said: "mics" turns them on or off (with its own volume).
+  With "follows view" (on at first) you hear only the player picked in Fog of war (keys 1-8). Otherwise, and with
+  fog "all", you hear the players whose "mic" button in the players list you switched on (none at first; clicking
+  one while "follows view" is on switches to picking by hand). The names of who is talking show over the map
+  (dimmed when you are not listening to them) and the event log lists each time someone talks.
 
 A .w2c file can be dropped onto the page next to its replay or capture (e.g. a player who was not captured).
-"Save .w2r" keeps the cameras in the replay.
+"Save .w2r" keeps the cameras and voices in the replay.
 
 Supported
 ---------

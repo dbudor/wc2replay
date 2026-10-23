@@ -21,9 +21,9 @@
 //   Unit voices (HK_VOICE_SELECT / HK_VOICE_ACK, the local player's clicks): the per-type pickers of the tables
 //     0x498c48 / 0x498aec are reproduced below (Snd_SelectVoice_* / Snd_AckVoice_*; LocalRng -> Math.random).
 // Viewer additions: pan by screen x, off-screen sounds fade further with distance from the view.
-// Music: Snd_PlayMusic 0x440ea0 streams Music\HUMAN1.WAV... through Storm; the BNE install has no music (it was
-// CD audio), neither MPQ holds any. The user can add those files (MUSIC_FILES); then they play, cycling as the
-// game's track table 0x4a1898 does.
+// Music: none (Snd_PlayMusic 0x440ea0 streams CD-audio Music\*.WAV files, which the BNE install does not have).
+// Volume: master -> voice bus (unit voices, the player view's spoken notices) + FX bus (everything else); the
+// microphones (micplay.js) go to the master too.
 
 export const HK = { SOUND: 1, VOICE_SELECT: 2, VOICE_ACK: 3, STATUS_MSG: 4, MSG_TIMED: 5, MUSIC: 12, STOP_SOUNDS: 13, SFX: 16, CMD: 17 };
 export const HKS_POSITIONAL = 1, HKS_FAR = 2, HKS_SELECT = 4, HKS_OTHER = 8, HKS_ALT = 16;
@@ -79,16 +79,6 @@ export function voiceVariants(kind, type, k, tileset) {
   return [...s];
 }
 
-// Music: track -> file (0x4a1898 {u8 file, u8 mode, u8, u8 next} with 0x4a184c names); mode 2 tracks chain to `next`.
-export const MUSIC_FILES = ['HUMAN1.WAV', 'HUMAN2.WAV', 'HUMAN3.WAV', 'HUMAN4.WAV', 'HUMAN5.WAV', 'HUMAN6.WAV', 'HWARROOM.WAV',
-  'HVICTORY.WAV', 'HDEFEAT.WAV', 'ORC1.WAV', 'ORC2.WAV', 'ORC3.WAV', 'ORC4.WAV', 'ORC5.WAV', 'ORC6.WAV', 'OWARROOM.WAV',
-  'OVICTORY.WAV', 'ODEFEAT.WAV', 'DISCOWC.WAV'];
-export const MUSIC_TRACKS = [[0, 2, 1], [1, 2, 2], [2, 2, 3], [3, 2, 4], [4, 2, 5], [5, 2, 0], [9, 2, 7], [10, 2, 8], [11, 2, 9],
-  [12, 2, 10], [13, 2, 11], [14, 2, 6], [8, 0, 0], [17, 0, 0], [7, 0, 0], [16, 0, 0], [4, 2, 17], [5, 2, 16], [13, 2, 19],
-  [14, 2, 18], [6, 1, 0], [15, 1, 0], [15, 1, 0], [3, 2, 24], [4, 2, 23], [18, 1, 0]];
-const trackFile = t => { const x = MUSIC_TRACKS[t]; return x ? MUSIC_FILES[x[0]] : null; };
-export const isMusicFile = name => MUSIC_FILES.includes(name.replace(/^.*[\\/]/, '').toUpperCase());
-
 // The two race tables from the arena: [{ names: [...], flags: [...] } for human, orc].
 export function readSoundTables(m) {
   const out = [];
@@ -132,25 +122,26 @@ export function parseWav(b) {
 //   player     viewed player (-1: no fog, everything audible, as the recorder)
 //   view       { x, y, w, h } viewport in tiles (like g_ViewX/Y, g_ViewportTilesW/H)
 //   voices     play HK_VOICE_SELECT / HK_VOICE_ACK
-// Returns { id, name, gain, pan, flags, ui } (ui: a sound of the recording player's own interface).
+// Returns { id, name, gain, pan, flags, ui, voice } (ui: a sound of the recording player's own interface; voice: a
+// unit voice, on the voice bus).
 export function resolveEvent(e, env) {
   const { m } = env, recorder = m.r8(A_LOCAL_PLAYER), p = env.player;
   const raceOf = q => { const r = m.r8(A_PLAYER_RACE + q); return r === 1 ? 1 : 0; };
-  let id, ui = false, pos = null, gain = GAIN_FULL;
+  let id, ui = false, pos = null, gain = GAIN_FULL, voice = false;
   switch (e.kind) {
     case HK.SOUND: id = e.a & 0xffff; break;
     case HK.SFX: id = e.b === 3 ? e.a : e.a + 1; ui = true; if (e.b === 2) gain = GAIN_LOW; break;   // raw index (clicks pass the 1-based id)
-    // player view (env.pview): the viewed player's UI voices and notifications come from playerview.js UiVoices
-    case HK.VOICE_ACK: if (!env.voices || env.pview || !e.d) return null; id = ackVoice(e.b, m.r8(A_TILESET)); ui = true; break;
-    case HK.VOICE_SELECT: if (!env.voices || env.pview) return null; id = selectVoice(e.c, e.b, m.r8(A_TILESET)); ui = true; break;
+    // env.ownUi (player view, or a fog-of-war player picked): its UI voices and notices come from playerview.js UiVoices
+    case HK.VOICE_ACK: if (!env.voices || env.ownUi || !e.d) return null; id = ackVoice(e.b, m.r8(A_TILESET)); ui = true; voice = true; break;
+    case HK.VOICE_SELECT: if (!env.voices || env.ownUi) return null; id = selectVoice(e.c, e.b, m.r8(A_TILESET)); ui = true; voice = true; break;
     default: return null;
   }
   if (!id) return null;
   const flags = e.kind === HK.SOUND ? e.d : 0;
   if (e.kind === HK.SOUND) {
     if (flags & HKS_OTHER) return null;           // per-player copies for the player view (playerview.js)
-    if (env.pview && !(flags & (HKS_POSITIONAL | HKS_FAR))) return null;   // the recorder's UI: UiVoices has every player's
-    if (flags & HKS_SELECT) { if (!env.voices) return null; ui = true; }   // building / unit selection sound (a click)
+    if (env.ownUi && !(flags & (HKS_POSITIONAL | HKS_FAR))) return null;   // the recorder's UI: UiVoices has every player's
+    if (flags & HKS_SELECT) { if (!env.voices || env.ownUi) return null; ui = true; }   // building / unit selection sound (a click)
     // neither positional nor far: a notification the sim emits for the recorder only (ready, work complete,
     // attacked); the construction sound is FAR-only and plays for every building, like the original's option
     if (!(flags & (HKS_POSITIONAL | HKS_FAR))) ui = true;
@@ -185,28 +176,27 @@ export function resolveEvent(e, env) {
       pan *= 0.9;
     } else pan *= 0.6;
   }
-  return { id, name, gain, pan, flags, ui };
+  return { id, name, gain, pan, flags, ui, voice };
 }
 
 // ---- WebAudio player ----
 const STORE = 'w2viewer.audio';
 function loadSettings() {
-  const d = { volume: 70, muted: false, voices: false, music: false };
+  const d = { volume: 70, voiceVolume: 100, fxVolume: 100, voices: false, mics: true, micVolume: 100 };
   try { const s = JSON.parse(localStorage.getItem(STORE) || 'null'); if (s && typeof s === 'object') Object.assign(d, s); } catch { /* no storage */ }
+  delete d.muted; delete d.music;   // older settings
   return d;
 }
 
 export class GameAudio {
   constructor() {
     this.settings = loadSettings();
-    this.ctx = null; this.master = null;
+    this.ctx = null; this.master = null; this.voiceBus = null; this.fxBus = null;
     this.getFile = null; this.tables = null;
     this.cache = new Map();          // name -> AudioBuffer | null (undecodable)
     this.extra = new Map();          // name -> wav bytes not in the MPQs (plugin samples)
     this.active = [];                // { src, name, t }
     this.lastStart = new Map();      // name -> ms
-    this.music = new Map();          // UPPERCASE file name -> Blob URL
-    this.musicEl = null; this.musicTrack = -1; this.musicNext = 0;
     this.wasEnabled = false;
     this.ui = null;
   }
@@ -221,6 +211,8 @@ export class GameAudio {
         this.ctx = new AC();
         this.master = this.ctx.createGain();
         this.master.connect(this.ctx.destination);
+        this.voiceBus = this.ctx.createGain(); this.voiceBus.connect(this.master);
+        this.fxBus = this.ctx.createGain(); this.fxBus.connect(this.master);
         this.applyVolume();
         this.ctx.onstatechange = () => this.refreshUi();
       }
@@ -234,13 +226,13 @@ export class GameAudio {
     if (this.getFile !== getFile) this.cache.clear();
     this.getFile = getFile;
     this.tables = readSoundTables(m);
-    this.musicTrack = -1;
   }
   setExtraFile(name, bytes) { this.cache.delete(name); if (bytes) this.extra.set(name, bytes); else this.extra.delete(name); }
   applyVolume() {
-    const v = this.settings.muted ? 0 : this.settings.volume / 100;
-    if (this.master) this.master.gain.value = v;
-    if (this.musicEl) this.musicEl.volume = Math.min(1, v);
+    const s = this.settings;
+    if (this.master) this.master.gain.value = s.volume / 100;
+    if (this.voiceBus) this.voiceBus.gain.value = (s.voiceVolume ?? 100) / 100;
+    if (this.fxBus) this.fxBus.gain.value = (s.fxVolume ?? 100) / 100;
   }
   buffer(name) {
     if (this.cache.has(name)) return this.cache.get(name);
@@ -257,7 +249,7 @@ export class GameAudio {
     return ab;
   }
   play(r) {
-    if (!this.running || this.settings.muted) return false;
+    if (!this.running) return false;
     const now = performance.now();
     this.active = this.active.filter(a => !a.done);
     if (this.active.length >= CHANNELS) return false;                       // all channels busy: dropped
@@ -268,7 +260,7 @@ export class GameAudio {
     src.buffer = buf; g.gain.value = r.gain;
     let node = src.connect(g);
     if (ctx.createStereoPanner && r.pan) { const pn = ctx.createStereoPanner(); pn.pan.value = r.pan; node = node.connect(pn); }
-    node.connect(this.master);
+    node.connect(r.voice ? this.voiceBus : this.fxBus);
     const a = { src, name: r.name, done: false };
     src.onended = () => { a.done = true; };
     src.start();
@@ -278,9 +270,9 @@ export class GameAudio {
   // A sound of player `player`'s own interface in the player view (playerview.js UiVoices): full volume, centred,
   // from that player's race table (the sound table Snd_ResetVoiceState installs for the local race).
   playUi(race, id) {
-    if (!this.tables || !this.running || this.settings.muted) return false;
+    if (!this.tables || !this.running) return false;
     const tab = this.tables[race === 1 ? 1 : 0], name = tab && tab.names[id - 1];
-    return name ? this.play({ id, name, gain: GAIN_FULL, pan: 0, flags: 0, ui: true }) : false;
+    return name ? this.play({ id, name, gain: GAIN_FULL, pan: 0, flags: 0, ui: true, voice: true }) : false;
   }
   stopAll() {
     for (const a of this.active) { try { a.src.stop(); } catch { /* already stopped */ } a.done = true; }
@@ -292,77 +284,26 @@ export class GameAudio {
     if (!this.tables || !events.length) return;
     for (const e of events) {
       if (e.kind === HK.STOP_SOUNDS) { this.stopAll(); continue; }
-      if (e.kind === HK.MUSIC) { if (e.b !== 1 || this.musicTrack < 0) this.musicTrack = e.a, this.musicNext = 0; continue; }
-      if (!env.enabled || !this.running || this.settings.muted) continue;
+      if (!env.enabled || !this.running) continue;
       const r = resolveEvent(e, { ...env, tables: this.tables, voices: this.settings.voices, hasAlt: this.extra.has(ALT_SOUND) });
       if (r) this.play(r);
     }
   }
-  // Every animation frame: music state. env: { playing, player, m }
-  frame(env) {
-    const want = this.settings.music && !this.settings.muted && this.running && env.playing && this.music.size > 0;
-    if (!want) { if (this.musicEl && !this.musicEl.paused) this.musicEl.pause(); return; }
-    if (!this.music.has(trackFile(this.musicTrack))) this.musicTrack = this.pickTrack(env);
-    if (this.musicTrack < 0) return;
-    const file = trackFile(this.musicTrack);
-    if (!this.musicEl || this.musicEl.dataset.file !== file) {
-      if (this.musicEl) this.musicEl.pause();
-      const el = this.musicEl = new Audio(this.music.get(file));
-      el.dataset.file = file;
-      el.onended = () => {   // Snd_MusicUpdate: mode 2 tracks chain to the next one after a 2 s pause
-        const t = MUSIC_TRACKS[this.musicTrack];
-        if (t && t[1] === 2) setTimeout(() => { this.musicTrack = t[2]; }, 2000);
-      };
-      this.applyVolume();
-    }
-    if (this.musicEl.paused && !this.musicEl.ended) this.musicEl.play().catch(() => {});
-  }
-  // Game start (0x415ec0): a random one of the viewed race's six in-game tracks (those the user supplied).
-  pickTrack(env) {
-    const m = env.m, q = env.player >= 0 ? env.player : m.r8(A_LOCAL_PLAYER), base = m.r8(A_PLAYER_RACE + q) === 1 ? 6 : 0;
-    let c = [0, 1, 2, 3, 4, 5].map(i => base + i).filter(t => this.music.has(trackFile(t)));
-    if (!c.length) c = MUSIC_TRACKS.map((t, i) => i).filter(t => this.music.has(trackFile(t)));
-    return c.length ? c[rnd(c.length)] : -1;
-  }
-  // End screen music (Dlg_MissionStatsHandler: Snd_PlayMusicIfIdle(race + 0xe on a win, race + 0xc on a loss):
-  // tracks 14/15 HVICTORY/OVICTORY, 12/13 HDEFEAT/ODEFEAT). False when that file was not supplied.
-  setScreenTrack(track) {
-    const f = trackFile(track);
-    if (!f || !this.music.has(f)) return false;
-    if (this.musicTrack !== track) { this.musicTrack = track; if (this.musicEl) { this.musicEl.pause(); this.musicEl = null; } }
-    return true;
-  }
-  addMusicFile(name, bytes) {
-    const f = name.replace(/^.*[\\/]/, '').toUpperCase();
-    if (!MUSIC_FILES.includes(f)) return false;
-    const old = this.music.get(f); if (old) URL.revokeObjectURL(old);
-    this.music.set(f, URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
-    this.refreshUi();
-    return true;
-  }
-
-  // Controls: { mute: button, volume: range 0..100, voices: checkbox, music: checkbox, status?: element }
+  // Controls: { volume, voiceVolume, fxVolume: ranges 0..100, voices: checkbox }
   bindControls(el) {
     this.ui = el;
     const s = this.settings;
-    el.volume.value = s.volume; el.voices.checked = s.voices; el.music.checked = s.music;
-    el.mute.onclick = () => { this.unlock(); s.muted = !s.muted; this.applyVolume(); if (s.muted) this.stopAll(); this.save(); this.refreshUi(); };
-    el.volume.oninput = () => { s.volume = +el.volume.value; if (s.muted && s.volume) s.muted = false; this.applyVolume(); this.save(); this.refreshUi(); };
+    el.volume.value = s.volume; el.voiceVolume.value = s.voiceVolume; el.fxVolume.value = s.fxVolume; el.voices.checked = s.voices;
+    for (const k of ['volume', 'voiceVolume', 'fxVolume']) el[k].oninput = () => { this.unlock(); s[k] = +el[k].value; this.applyVolume(); this.save(); };
     el.voices.onchange = () => { s.voices = el.voices.checked; this.save(); };
-    el.music.onchange = () => { s.music = el.music.checked; this.save(); this.refreshUi(); };
-    const gesture = () => { this.unlock(); if (this.running) for (const k of ['pointerdown', 'keydown']) window.removeEventListener(k, gesture, true); };
-    for (const k of ['pointerdown', 'keydown']) window.addEventListener(k, gesture, true);
+    const gesture = () => { this.unlock(); if (this.running) for (const k of ['pointerdown', 'keydown', 'touchend', 'click']) window.removeEventListener(k, gesture, true); };
+    for (const k of ['pointerdown', 'keydown', 'touchend', 'click']) window.addEventListener(k, gesture, true);
     this.refreshUi();
   }
   refreshUi(env) {
     const el = this.ui; if (!el) return;
     if (env) this.lastEnabled = env.enabled;
-    const s = this.settings;
-    el.mute.textContent = s.muted ? 'Sound off' : 'Sound on';
-    el.mute.classList.toggle('off', s.muted);
-    el.mute.title = !this.running ? 'Sound starts with your first click or key press (browser autoplay rule)'
-      : s.muted ? 'Unmute' : this.lastEnabled === false ? 'Mute (sound plays only at 1x and 2x, not while seeking)' : 'Mute';
-    el.music.parentElement.title = this.music.size ? `Music: ${this.music.size} track file(s) loaded`
-      : 'Music: Warcraft II BNE has no music files (the original used CD audio). Add HUMAN1.WAV…ORC6.WAV from a CD install to hear it.';
+    el.volume.title = !this.running ? 'Volume. Sound starts with your first click or key press (browser autoplay rule)'
+      : this.lastEnabled === false ? 'Volume (sound plays only at 1x and 2x, not while seeking)' : 'Volume';
   }
 }
