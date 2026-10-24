@@ -12,7 +12,7 @@ You need
 * Your own copy of Warcraft II: Battle.net Edition 2.02: the files "Warcraft II BNE.exe" and "War2Dat.mpq"
   (and "War2Patch.mpq" if your install has one). This package contains no Blizzard game data; the viewer reads
   graphics, maps and unit data from your files, inside your browser. Nothing is uploaded anywhere.
-* A replay: a packet capture (.pcapng / .pcap) of an IPX game, or a converted replay (.w2r).
+* A replay: a packet capture (.pcapng / .pcap) of an IPX game, or a converted replay (.w2r, or gzipped .w2r.gz).
   replays/ has samples: a 1v1 Classic game on Garden of War (.w2r) and a 1v1 capture on Islands in the stream
   (game2.pcapng, with one player's recorded camera).
 
@@ -32,7 +32,7 @@ the WAR2_DIR environment variable, the viewer's own folder, the folder above it,
 serves only "Warcraft II BNE.exe", War2Dat.mpq and War2Patch.mpq from it (read-only, to your own browser on
 localhost). serve.command / serve.bat pass their arguments on to serve.py.
 
-Replays folder: the "Replays" list at the top of the page shows the replays (.w2r), captures (.pcapng/.pcap),
+Replays folder: the "Replays" list at the top of the page shows the replays (.w2r, .w2r.gz), captures (.pcapng/.pcap),
 CamRec camera files (.w2c) and maps (.pud) in the viewer's replays/ folder (and its subfolders, two deep), newest
 first; picking one loads it. A replay or capture on a custom map brings its .pud along when the folder has it.
 Point it at another folder with --replays DIR (or the WAR2_REPLAYS environment variable), e.g. where you save
