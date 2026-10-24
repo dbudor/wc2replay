@@ -97,6 +97,9 @@ body:has(#controls[hidden]) .status { order: 1; font-size: 13px; line-height: 1.
 body:has(#controls[hidden]) .btn.file { align-self: flex-start; padding: 9px 18px; font-size: 14px; }
 body:has(#controls[hidden]) .field { justify-content: space-between; font-size: 13px; }
 body:has(#controls[hidden]) .field select { flex: 1; max-width: 340px; }
+body:has(#controls[hidden]) #bar { flex-wrap: nowrap; }   /* one column: a wrapped column grows to its widest child */
+body:has(#controls[hidden]) :is(.field, .field select, .status) { min-width: 0; }   /* long replay names must not widen the card */
+body:has(#controls[hidden]) .status { overflow-wrap: anywhere; }
 body:has(#controls[hidden]) :is(#side, #miniCard, #score) { display: none !important; }
 
 /* ---- score strip (left): team 1 above team 2, a card per player */
@@ -159,7 +162,14 @@ body.pview #mini { display: none; }
 body.pview .mapBtns { bottom: 0; }
 #mini { display: block; width: 200px; height: 200px; image-rendering: pixelated; background: #000; cursor: crosshair; border-radius: 6px; }
 body.pview :is(#side, #sideOpen, #scoreBtn, #score) { display: none !important; }
-@media (min-width: 761px) { body.screenUp :is(#side, #score, #miniCard) { display: none !important; } }
+body.screenUp :is(#side, #score, #miniCard) { display: none !important; }
+/* phone-only controls (menu, settings), the collapsed players sheet's summary */
+#menuBtn, #setBtn, .sideSum { display: none; }
+/* minimap off (its button): only the button row stays */
+body.miniOff #mini { display: none; }
+body.miniOff #miniCard { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0; }
+body.miniOff .mapBtns { bottom: 0; }
+body.miniOff .score { max-height: calc(100% - var(--hud-b) - 70px); }
 
 /* ---- timeline (bottom); seekBtn modes: auto (floats, fades while playing), show (docked: the map ends above it), hide */
 body.seek-show #controls { left: 0; right: 0; bottom: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
@@ -237,52 +247,85 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
   body.flip:not(.pview) .inspect.float { right: auto; left: 12px; }
 }
 
-/* ---- short landscape windows (phones on their side): smaller panels */
-@media (max-height: 500px) and (min-width: 761px) {
-  #side { width: 250px; padding: 8px; gap: 6px; }
-  #mini { width: 128px; height: 128px; }
-  #controls { padding: 4px 10px 6px; }
-  .score { width: 150px; max-height: calc(100% - var(--hud-b) - 208px); }
-}
-
-/* ---- phones (portrait): the page scrolls; bar, map, timeline, minimap + panel stacked */
-@media (max-width: 760px) {
-  body { overflow: auto; height: auto; min-height: 100%; }
-  #stage { height: auto; overflow: visible; display: flex; flex-direction: column; gap: 8px; padding: 8px max(8px, env(safe-area-inset-left)); }
-  .glass, .score, #controls, #side, #miniCard, #bar { position: static !important; transform: none !important; inset: auto; }
-  #miniCard { position: relative !important; }
-  body.playing #bar { opacity: 1; pointer-events: auto; }
-  body.idle :is(#bar, #controls) { opacity: 1; transform: none; pointer-events: auto; }
-  #bar { order: 0; gap: 6px 8px; padding: 8px 10px; max-width: none !important; }
-  body:has(#controls[hidden]) #bar { width: auto; margin-top: 18svh; }
-  .brand { font-size: 13px; }
-  .status { flex-basis: 100%; max-width: none !important; white-space: normal !important; }
-  .score { order: 1; width: auto; max-height: none; flex-direction: row; overflow-x: auto; gap: 6px; }
-  .team { flex: none; flex-direction: row; }
-  .tl { writing-mode: vertical-rl; transform: rotate(180deg); padding: 0; }
-  .pc { width: 104px; }
-  body.seek-show #viewWrap { bottom: auto; }
-  #viewWrap { order: 2; position: relative; inset: auto; height: 62svh; border-radius: var(--r); overflow: hidden; }
-  body.pview #viewWrap { height: auto; aspect-ratio: 4 / 3; max-height: 75svh; }   /* the game's 640x480 screen */
-  #controls { order: 3; }
-  #miniCard { order: 4; align-self: flex-start; }
-  #miniCard { display: flex; flex-direction: column; gap: 6px; }
-  .mapBtns { position: static; order: -1; }
-  #mini { width: 160px; height: 160px; }
-  #side { order: 5; width: auto; overflow: visible; }
-  body.sideMin #side { display: flex; }
-  #sideOpen { display: none !important; }
+/* ================================================================ phones
+   P: upright (narrow and tall): score strip / map / one-row timeline in a column; minimap and its buttons over the
+      map's bottom-left; the players panel is a sheet along the bottom (tap its title to open; a tapped unit opens it).
+   L: on its side (short): the desktop's floating layout, smaller; score, panel and minimap start hidden (their buttons
+      bring them; each mode remembers its own choice).
+   Both: the top bar only on the start screen, else from the menu button; the timeline in one row with the sound and
+   view settings behind the gear button. */
+@media (max-width: 760px) and (min-height: 501px), (max-height: 500px) and (orientation: landscape) {
+  body:not(:has(#controls[hidden])):not(.menuOpen) #bar { display: none; }
+  body.menuOpen #bar { top: 8px; left: 8px; right: 8px; transform: none; max-width: none !important; flex-wrap: wrap; opacity: 1; pointer-events: auto; z-index: 9; }
+  #menuBtn, #setBtn { display: inline-grid; }
+  #menuBtn { order: -1; }
+  body.menuOpen #menuBtn { background: var(--accent); color: #1a1408; }
+  body.setOpen #setBtn { color: var(--accent); }
+  #controls { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 8px; }
+  .ctlRow { display: contents; }
+  .transport { order: 1; gap: 0; }
+  #step { display: none; }
+  .speed { margin-left: 2px; padding: 3px 2px; font-size: 12px; }
+  .timeline { order: 2; flex: 1 1 60px; min-width: 60px; }
+  .clock { order: 3; font-size: 0; }
+  .clock b { font-size: 13px; margin: 0; }
+  #setBtn { order: 4; }
+  #fullBtn { order: 5; }
+  .iconBtn { width: 32px; height: 32px; }
+  .iconBtn.big { width: 38px; height: 38px; }
+  .audio, .viewTogs, .pvSlot { display: none; order: 10; flex-basis: 100%; margin: 0; }
+  body.setOpen :is(.audio, .viewTogs, .pvSlot) { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 6px 2px 2px; }
+  body.setOpen .pvSlot:empty { display: none; }
+  #volume, #voiceVol, #fxVol, #micVol { width: 64px; }
+  input[type=checkbox] { width: 18px; height: 18px; }
+  .mapBtns { gap: 5px; }
+  .mapBtn { width: 34px; height: 34px; border-radius: 9px; }
+  .mapBtn svg { width: 17px; height: 17px; }
   .btn { padding: 7px 12px; }
   select { padding: 6px 4px; }
-  input[type=checkbox] { width: 18px; height: 18px; }
-  .clock { font-size: 12px; }
-  .audio { margin-left: 0; }
-  #volume, #voiceVol, #fxVol { width: 56px; }
-  #micVol { display: none; }
-  body.pview #side { display: flex !important; }      /* the player view has its own minimap; keep the card, players and events */
-  #inspect { order: -1; }
+}
+
+/* ---- P: upright phone */
+@media (max-width: 760px) and (min-height: 501px) {
+  #stage { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100svh; }
+  body:has(#controls[hidden]) #bar { width: calc(100% - 24px); padding: 18px; }
+  .score { position: relative; grid-row: 1; top: auto; left: auto !important; right: auto !important; width: auto; max-height: none; flex-direction: column;
+    gap: 3px; padding: 6px 6px 0; overflow: visible; }
+  .team { flex-direction: row; overflow-x: auto; gap: 3px; padding: 3px; scrollbar-width: none; }
+  .tl { display: none; }
+  .pc { flex: 1 0 23%; min-width: 72px; padding: 2px 5px 2px 8px; }
+  .pc .n { font-size: 11px; }
+  .pc .s { font-size: 11px; word-spacing: 1px; }
+  #viewWrap { position: relative; grid-row: 2; inset: auto; }
+  body.seek-show #viewWrap { bottom: auto; }
+  #controls { position: relative; grid-row: 3; left: auto; right: auto; bottom: auto; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+  body.idle #controls { opacity: 1; transform: none; pointer-events: auto; }
+  #miniCard { left: 8px; bottom: calc(var(--ctl-h, 50px) + 60px); padding: 4px; }
+  #mini { width: 96px; height: 96px; }
+  #side { left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(var(--ctl-h, 50px) + 8px) !important; width: auto; max-height: 44px !important;
+    overflow: hidden; padding: 10px 12px; gap: 8px; transition: max-height .25s ease; }
+  body.sheetOpen #side { max-height: 62% !important; overflow-y: auto; z-index: 5; }   /* over the minimap */
+  .sideHead { cursor: pointer; margin: 0; min-height: 22px; }
+  .sideHead::after { content: "▴"; color: var(--muted); margin-left: auto; padding-left: 10px; }
+  body.sheetOpen .sideHead::after { content: "▾"; }
+  .sideSum { display: block; flex: 1; margin-left: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; }
+  body.sheetOpen .sideSum { visibility: hidden; }
+  .player .res { grid-template-columns: repeat(3, 1fr); }
   .inspect { font-size: 13px; }
-  .inspect.float { position: absolute; top: auto; right: 6px; left: 6px; bottom: 6px; width: auto; max-height: 45%; overflow-y: auto; }
   .inspX { font-size: 22px; padding: 0 6px; }
   .talkers { top: 8px; max-width: 90%; }
+  .toast { top: 30%; }
+}
+
+/* ---- L: phone on its side (the floating layout, smaller) */
+@media (max-height: 500px) and (orientation: landscape) {
+  #side { width: 240px; padding: 8px; gap: 6px; }
+  #mini { width: 110px; height: 110px; }
+  #miniCard { padding: 4px; }
+  .score { width: 140px; max-height: calc(100% - var(--hud-b) - 190px); }
+  body.miniOff .score { max-height: calc(100% - var(--hud-b) - 56px); }
+  .pc .n, .pc .s { font-size: 11px; }
+  .team { padding: 4px; }
+  .inspect.float { width: 220px; max-height: calc(100% - var(--hud-b) - 20px); overflow-y: auto; }
+  body:has(#controls[hidden]) #bar { width: min(560px, calc(100% - 24px)); padding: 14px 18px; gap: 8px; }
 }
