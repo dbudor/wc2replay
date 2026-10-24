@@ -374,11 +374,18 @@ function w2rPudName(b) {
   return '';
 }
 // A custom map from the viewer's maps/ folder (served next to the page), as picked.puds' entry; null when absent.
+// maps/index.json (make_dist.sh) lists the files: web hosts have case-sensitive names, replays may not.
+let mapIndex = null;
 async function fetchMap(name) {
   if (!/^https?:$/.test(location.protocol) || !name) return null;
-  const n = name.replace(/^.*[\\/]/, ''), key = n.toLowerCase();
+  const n = name.replace(/^.*[\\/]/, ''), key = n.toLowerCase(), base = n.replace(/\.pud$/i, '');
   if (picked.puds.has(key)) return [key, picked.puds.get(key)];
-  for (const v of [...new Set([n, key, n.toUpperCase(), n.replace(/\.pud$/i, '') + '.pud'])]) {
+  if (mapIndex === null) {
+    mapIndex = [];
+    try { const r = await fetch('maps/index.json', { cache: 'no-store' }); if (r.ok) { const j = await r.json(); if (Array.isArray(j)) mapIndex = j.filter(x => typeof x === 'string'); } } catch { /* no index */ }
+  }
+  const listed = mapIndex.filter(x => x.toLowerCase() === key);
+  for (const v of [...new Set([...listed, n, key, base.toUpperCase() + '.pud', base.toLowerCase() + '.pud', n.toUpperCase()])]) {
     try {
       const r = await fetch('maps/' + encodeURIComponent(v), { cache: 'no-store' });
       if (r.ok) { const b = new Uint8Array(await r.arrayBuffer()); picked.puds.set(key, b); return [key, b]; }
