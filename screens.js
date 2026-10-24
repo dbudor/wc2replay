@@ -322,10 +322,11 @@ function box(s, c, pal) {
   const dark = at(0xef), light = at(0x6c);
   s.fill(c.l, c.t, w, 1, dark); s.fill(c.l, c.t, 1, h, dark); s.fill(c.l, c.t + h - 1, w, 1, light); s.fill(c.l + w - 1, c.t, 1, h, light);
 }
-function button(s, f, c, label, ramp, pal) {
-  const w = c.r - c.l + 1, h = c.b - c.t + 1, at = i => [pal[3 * i], pal[3 * i + 1], pal[3 * i + 2]];
-  s.fill(c.l, c.t, w, h, [0, 0, 0], 0.6);
-  const dark = at(0xef), light = at(0x6c);
+function button(s, f, c, label, ramp, pal) {   // the game's red menu button (its art is not in the MPQs: a dark red bevel)
+  const w = c.r - c.l + 1, h = c.b - c.t + 1;
+  s.fill(c.l, c.t, w, h, [112, 12, 8]);
+  s.fill(c.l + 2, c.t + 2, w - 4, h - 4, [84, 4, 4]);
+  const dark = [36, 0, 0], light = [176, 44, 28];
   s.fill(c.l, c.t, w, 1, light); s.fill(c.l, c.t, 1, h, light); s.fill(c.l, c.t + h - 1, w, 1, dark); s.fill(c.l + w - 1, c.t, 1, h, dark);
   s.text(f, label, c.l, centerY(f, c), ramp, 'c', w);
 }
@@ -347,11 +348,10 @@ export function renderLobby(art, L) {
     put(c, /^Ready/.test(c.text) ? 'Recorded game: press Play (or Start replay) to start' : c.text);
   }
   for (const sl of L.slots) {
-    const nameC = by(20 + sl.k), infoC = by(12 + sl.k), colC = by(43 + sl.k), hostC = by(28 + sl.k), readyC = sl.k ? by(35 + sl.k) : null;
+    const nameC = by(20 + sl.k), infoC = by(12 + sl.k), colC = by(43 + sl.k), hostC = by(28 + sl.k);
     const occupied = sl.kind === 'human' || (sl.kind === 'computer' && sl.inGame);
-    if (nameC) { box(s, nameC, pal); put(nameC, sl.name, { pad: 4, set: sl.kind === 'human' ? ctrlSet(nameC) : 5 }); }
+    if (nameC) put(nameC, sl.name, { pad: 4, set: 4 });   // as the game: names and "Available" in the label white, on the parchment
     if (infoC) {
-      box(s, infoC, pal);
       let t = '';
       if (occupied) {
         const actual = sl.race === 1 ? 'Orc' : 'Human';
@@ -362,19 +362,17 @@ export function renderLobby(art, L) {
     }
     if (colC && occupied) { s.fill(colC.l, colC.t + 1, colC.r - colC.l + 1, colC.b - colC.t - 1, sl.color); s.bevel(colC.l, colC.t + 1, colC.r - colC.l + 1, colC.b - colC.t - 1); }
     if (hostC && sl.host) put(hostC, 'H', { align: 'c', set: 2 });
-    if (readyC && sl.kind === 'human') { box(s, readyC, pal); if (sl.ready) put(readyC, 'x', { align: 'c', set: 2 }); }
   }
-  const val = (id, t) => { const c = by(id); if (!c) return; box(s, c, pal); put(c, t, { pad: 4 }); };
+  const val = (id, t) => { const c = by(id); if (!c) return; put(c, t, { pad: 4, set: 2 }); };
   val(10, L.yourRace);
   val(4, L.options.resources); val(5, L.options.location); val(6, L.options.units);
   val(7, L.options.fog); val(8, L.options.tileset);
   val(9, L.extended ? L.speed : L.options.cheats);
   const sc = by(11);
   if (sc) {
-    box(s, sc, pal);
     const f = ctrlFont(F, sc);
     [`${L.scenarioKind}: ${L.mapTitle}`, `Map ${L.mapSize}x${L.mapSize}, ${L.mode}, speed ${L.speed}`]
-      .forEach((t, i) => put(sc, t, { pad: 4, y: sc.t + 4 + i * (f.maxH + 2) }));
+      .forEach((t, i) => put(sc, t, { y: sc.t + 2 + i * (f.maxH + 4), set: 4 }));
   }
   const lv = by(1);
   if (lv) button(s, ctrlFont(F, lv), lv, 'Start replay', R[2], pal);
@@ -492,6 +490,18 @@ export class GameTracker {
     this.types = [...m.bytes(PT, 8)]; this.res = [...m.bytes(RES, 8)];
     this.peerOf = [0, 1, 2, 3, 4, 5, 6, 7].map(p => m.r8(CHAT + 0x38 * p + 1));
     this.players = [0, 1, 2, 3, 4, 5, 6, 7].filter(p => this.types[p] === 1 || (this.types[p] === 0 && m.r8(CHAT + 0x38 * p) === 1));
+  }
+  // The game went on after the capture's last turn (the capturing PC surrendered first: the others stop sending
+  // it turns), but the CamRec cameras, broadcast, kept coming: a player whose camera ended after the replay and
+  // clearly before the last camera to end left the game then (surrender / quit). camEnds: Map player -> end tick.
+  // Run once the replay has ended; marks only players still in, and only when some camera outlasted the replay.
+  afterEnd(lastTick, camEnds, slack = 8) {
+    const ends = [...camEnds].filter(([p, t]) => t != null && this.players.includes(p) && this.types[p] === 0);
+    if (!ends.length) return;
+    const latest = Math.max(...ends.map(([, t]) => t));
+    if (latest <= lastTick + slack) return;
+    for (const [p, t] of ends)
+      if (t > lastTick && t < latest - slack && !this.left.has(p)) this.left.set(p, { turn: null, tick: t, kind: 'quit', camera: true });
   }
   // after each turn (turn = index of the turn just run)
   after(m, turn, tick) {

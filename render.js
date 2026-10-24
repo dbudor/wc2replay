@@ -37,7 +37,7 @@ export class MapRenderer {
     this.createCanvas = createCanvas; this.tileset = tileset; this.sprites = sprites;
     this.cycler = cycler;
     this.fogPlayer = -1;   // -1: everything visible
-    this.showHp = true;
+    this.showHp = false;
     this.tilesVersion = 0;
   }
   ownerColor(m, owner) {

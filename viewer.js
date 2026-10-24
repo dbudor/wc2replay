@@ -246,9 +246,9 @@ async function convert() {
   const cap = picked.capture, peer = ui.peer.value || 'host';
   let pud = null, pudName;
   if (cap.customMap) {
-    const want = cap.mapName.toLowerCase();
-    const hit = [...picked.puds].find(([n]) => n.replace(/\.pud$/, '') === want) || (picked.puds.size === 1 ? [...picked.puds][0] : null);
-    if (!hit) throw new Error(`This capture is a game on the custom map “${cap.mapName || '?'}”: add that map's .pud file${picked.puds.size > 1 ? ' (several .pud files are loaded: keep only that one)' : ''}.`);
+    const want = cap.mapName.toLowerCase().replace(/\.pud$/, '');
+    const hit = [...picked.puds].find(([n]) => n.replace(/\.pud$/, '') === want) || await fetchMap(want + '.pud') || (picked.puds.size === 1 ? [...picked.puds][0] : null);
+    if (!hit) throw new Error(`This capture is a game on the custom map “${cap.mapName || '?'}”: add that map's .pud file${picked.puds.size > 1 ? ' (several .pud files are loaded: keep only that one)' : ''}, or put it in the viewer's maps/ folder.`);
     [pudName, pud] = hit;
   }
   await ensureGameData();
@@ -373,6 +373,19 @@ function w2rPudName(b) {
   }
   return '';
 }
+// A custom map from the viewer's maps/ folder (served next to the page), as picked.puds' entry; null when absent.
+async function fetchMap(name) {
+  if (!/^https?:$/.test(location.protocol) || !name) return null;
+  const n = name.replace(/^.*[\\/]/, ''), key = n.toLowerCase();
+  if (picked.puds.has(key)) return [key, picked.puds.get(key)];
+  for (const v of [...new Set([n, key, n.toUpperCase(), n.replace(/\.pud$/i, '') + '.pud'])]) {
+    try {
+      const r = await fetch('maps/' + encodeURIComponent(v), { cache: 'no-store' });
+      if (r.ok) { const b = new Uint8Array(await r.arrayBuffer()); picked.puds.set(key, b); return [key, b]; }
+    } catch { /* try the next spelling */ }
+  }
+  return null;
+}
 async function loadFromList(name) {
   const url = n => 'replays/' + n.split('/').map(encodeURIComponent).join('/');
   const get = async n => { const r = await fetch(url(n), { cache: 'no-store' }); if (!r.ok) throw new Error(`cannot fetch replays/${n} (${r.status})`); return new Uint8Array(await r.arrayBuffer()); };
@@ -381,7 +394,7 @@ async function loadFromList(name) {
   const b = await get(name), fl = [file(name, b)];
   let map = '';
   if (/\.w2r$/i.test(name)) map = w2rPudName(b);
-  else if (/\.(pcapng|pcap|cap)$/i.test(name)) { try { const c = parseCapture(b); if (c.customMap) map = c.mapName + '.pud'; } catch { /* addFiles reports it */ } }
+  else if (/\.(pcapng|pcap|cap)$/i.test(name)) { try { const c = parseCapture(b); if (c.customMap) map = /\.pud$/i.test(c.mapName) ? c.mapName : c.mapName + '.pud'; } catch { /* addFiles reports it */ } }
   const base = s => s.replace(/^.*[\\/]/, '').toLowerCase();
   const pud = map && !picked.puds.has(base(map)) && replayIndex.find(e => /\.pud$/i.test(e.name) && base(e.name) === base(map));
   if (pud) fl.unshift(file(pud.name, await get(pud.name)));
@@ -567,8 +580,8 @@ async function boot() {
   if (!(probe instanceof Error)) { attach(probe); return; }
   if (!/custom map/.test(probe.message)) throw probe;
   const want = /custom map (.*)$/.exec(probe.message)[1].replace(/^.*[\\/]/, '').toLowerCase();
-  pud = picked.puds.get(want) || [...picked.puds.values()][0];
-  if (!pud) throw new Error(`This replay uses the custom map “${want}”: add that .pud file.`);
+  pud = picked.puds.get(want) || (await fetchMap(want))?.[1] || [...picked.puds.values()][0];
+  if (!pud) throw new Error(`This replay uses the custom map “${want}”: add that .pud file, or put it in the viewer's maps/ folder.`);
   attach(await SimSession.boot({ module: st.module, exe: picked.exe, files: st.files, replay: picked.replay, pud, rules }));
 }
 function attach(s) {
@@ -613,6 +626,7 @@ function stepTurn(log = true) {
   const r = s.step();
   st.fog.update(s.mem());
   st.tracker.after(s.mem(), s.turn - 1, s.tick);
+  if (s.ended && st.cam.tracks.size) st.tracker.afterEnd(s.tick, new Map([...st.cam.tracks].map(([p, tr]) => [p, tr.endTick])));
   const ev = s.drainHooks();
   if (log) logEvents(ev);
   audio.handle(ev, audioEnv());

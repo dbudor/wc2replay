@@ -5,12 +5,29 @@
 // from the game (the replay stalled, or the tab slept). Only at 1x: other speeds stop the voices.
 // Which players are heard: the one the view is linked to (focus, set by the viewer every frame), else the ones
 // picked by hand (picked; none at first).
-import { micChunks, micChunkPcm, MIC_RATE } from './camrec.js';
+import { micChunks, micChunkPcm, adpcmDecode, MIC_RATE } from './camrec.js';
 
 const LOOKAHEAD = 0.4;        // s
 const DRIFT = 0.3;            // s: a playing chunk further than this from the game is restarted
 const KEEP = 90;              // s: decoded chunks further than this from the game are dropped (memory)
-const TARGET = 2500;          // speech level (mean |sample|) the per-player gain aims for
+const TARGET = 0.1;           // speech level (mean |sample| of a loud 20 ms frame, -1..1) the per-player gain aims for
+const MAX_GAIN = 300;         // headsets left at a low Windows level deliver speech at -50..-60 dBFS
+const FRAME = 320;            // 20 ms
+
+// A track's speech level: the 90th percentile of its 20 ms frames' mean |sample| (the plugin stores only speech,
+// so this is a loud word, not one click). 0 when it holds no audio.
+export function speechLevel(track) {
+  const lv = [], buf = new Float32Array(4096);
+  for (const b of track.blocks) {
+    if (!b.n || b.n > buf.length) continue;
+    adpcmDecode(b, buf, 0);
+    for (let o = 0; o + FRAME <= b.n; o += FRAME) { let s = 0; for (let i = o; i < o + FRAME; i++) s += Math.abs(buf[i]); lv.push(s / FRAME); }
+  }
+  if (!lv.length) return 0;
+  lv.sort((a, b) => a - b);
+  return lv[Math.min(lv.length - 1, Math.floor(lv.length * 0.9))];
+}
+export const speechGain = level => level > 0 ? Math.max(0.5, Math.min(MAX_GAIN, TARGET / level)) : 1;
 
 export class MicPlayer {
   constructor(audio) {
@@ -30,9 +47,8 @@ export class MicPlayer {
     this.tracks = tracks; this.tickMs = tickMs; this.chunks = new Map();
     for (const [p, tr] of tracks) {
       this.chunks.set(p, micChunks(tr, tickMs));
-      // even out the players' levels (headset gains differ a lot): from the loudest 20 ms frame the plugin saw
-      const peak = tr.info && tr.info.peak ? tr.info.peak : TARGET;
-      this.playerGain.set(p, Math.max(0.5, Math.min(4, TARGET / (0.6 * peak))));
+      // even out the players' levels (headset gains differ a lot, some by 40 dB): from the speech itself
+      this.playerGain.set(p, speechGain(speechLevel(tr)));
     }
   }
   get players() { return [...this.chunks.keys()].filter(p => this.chunks.get(p).length).sort((a, b) => a - b); }
@@ -54,7 +70,14 @@ export class MicPlayer {
     }
     const a = this.audio, ctx = a.ctx;
     if (!env.active || !this.enabled || !a.running) { if (this.live.size) this.stopAll(); return; }
-    if (!this.gainNode) { this.gainNode = ctx.createGain(); this.gainNode.connect(a.master); }
+    if (!this.gainNode) {   // the boosted voices through a compressor, so a shout after the gain does not clip
+      this.gainNode = ctx.createGain();
+      if (ctx.createDynamicsCompressor) {
+        const k = ctx.createDynamicsCompressor();
+        k.threshold.value = -20; k.knee.value = 6; k.ratio.value = 12; k.attack.value = 0.003; k.release.value = 0.2;
+        this.gainNode.connect(k).connect(a.master);
+      } else this.gainNode.connect(a.master);
+    }
     this.gainNode.gain.value = (a.settings.micVolume ?? 100) / 100;
     const now = ctx.currentTime;
     for (const [c, l] of this.live) {   // ended, switched off, or no longer where the game is
