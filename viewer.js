@@ -71,8 +71,8 @@ import { SimSession, compileSim, convertDetectRules } from './sim.js';
 import { parseCapture, convertCapture, CaptureError, crc32, withLocalQuit } from './pcap.js';
 import { loadTileset } from './tileset.js';
 import { MapRenderer, FogTracker } from './render.js';
-import { readUnits, readPlayers, tickMs, soundNames, UNIT_NAMES, A } from './gamestate.js';
-import { GameAudio, ALT_SOUND } from './audio.js';
+import { readUnits, readPlayers, tickMs, A } from './gamestate.js';
+import { GameAudio, ALT_SOUND, HK } from './audio.js';
 import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outcome, playerStats, GameTracker, OUTCOME_TEXT } from './screens.js';
 import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
@@ -87,17 +87,18 @@ const mic = new MicPlayer(audio);   // the players' microphones (CamRec)
 audio.bindControls({ volume: $('volume'), voiceVolume: $('voiceVol'), fxVolume: $('fxVol'), voices: $('voices') });
 const ui = { status: $('status'), controls: $('controls'), play: $('play'), step: $('step'), speed: $('speed'), seek: $('seek'),
   clock: $('clock'), view: $('view'), mini: $('mini'), fog: $('fog'), hp: $('hp'), players: $('players'), log: $('log'),
-  logSounds: $('logSounds'), logVoices: $('logVoices'), drop: $('drop'), wrap: $('viewWrap'),
-  peerBox: $('peerBox'), peer: $('peer'), save: $('save'), rules: $('rules'),
+  drop: $('drop'), wrap: $('viewWrap'),
+  peerBox: $('peerBox'), peer: $('peer'), save: $('save'), share: $('share'), shareBox: $('shareBox'), pauseAfter: $('pauseAfter'), rules: $('rules'),
   pview: $('pview'), follow: $('follow'), fogBtn: $('fogBtn'), micLink: $('micLink'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
-  camShow: $('camShow'), camBox: $('camBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect') };
+  camShow: $('camShow'), camBox: $('camBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect'),
+  score: $('score'), bar: $('bar'), side: $('side'), sideOpen: $('sideOpen'), toast: $('toast') };
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
   capture: null, captureName: '', converted: null,
   camCapture: [], camFiles: [] };   // CamRec packets: from the capture, from dropped .w2c files   // capture: parseCapture result; converted: { peer, w2r, name }
 const st = {
   module: null, mpq: null, files: null, session: null, tileset: null, renderer: null, sprites: null, fog: null,
-  playing: false, speed: 1, totalTurns: 0, tickMs: 26.67, budget: 0, lastT: 0, busy: false, sounds: [], looping: false, datKey: null,
+  playing: false, speed: 1, totalTurns: 0, tickMs: 26.67, budget: 0, lastT: 0, busy: false, looping: false, datKey: null,
   view: { x: 0, y: 0, scale: 1 }, logN: 0,
   art: null, match: null, tracker: null, lobby: null,
   screen: null,          // { kind: 'intro' | 'outro', t0, player, img, key } while a full-view screen is up
@@ -109,7 +110,7 @@ const st = {
   cam: { tracks: new Map(), curBytes: [], cursors: [] },   // recorded cameras by player; Art\h_arrow.cur / o_arrow.cur
   stepClock: null,       // { from: g_TickCount before the last step, t } while playing (smooth camera time)
 };
-const setStatus = (msg, err = false) => { ui.status.textContent = msg; ui.status.classList.toggle('err', err); };
+const setStatus = (msg, err = false) => { ui.status.textContent = msg; ui.status.title = msg; ui.status.classList.toggle('err', err); if (err) $('cover').hidden = true; };
 
 // ---------------------------------------------------------------- War2Combat plugin rules (Peon2k)
 // The sim implements Peon2k's rule changes (src/lift/mod_peon2k.c) behind W2_PATCH_PEON2K_022 / _023, + _FIX (0x400)
@@ -198,14 +199,14 @@ async function addFiles(list) {
     if (n.endsWith('.exe')) picked.exe = await buf();
     else if (n === 'war2dat.mpq') picked.dat = await buf();
     else if (n === 'war2patch.mpq') picked.patch = await buf();
-    else if (/\.w2r(\.gz)?$/.test(n)) { picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
+    else if (/\.w2r(\.gz)?$/.test(n)) { picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.listName = f.listName || null; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
     else if (n.endsWith('.pud')) picked.puds.set(n, await buf());
     else if (n.endsWith('.w2p')) { setPlugin(pluginInfo(await buf(), f.name)); onlyPlugin = true; continue; }
     else if (/\.(pcapng|pcap|cap)$/.test(n)) {
       const b = await buf();
       try { newCapture = parseCapture(b); } catch (e) { reportError(e, f.name); return; }
       picked.camCapture = camPacketsFromCapture(b);
-      picked.capture = newCapture; picked.captureName = f.name; picked.converted = null; picked.replay = null;
+      picked.capture = newCapture; picked.captureName = f.name; picked.listName = f.listName || null; picked.converted = null; picked.replay = null;
     }
     else if (n.endsWith('.mpq') && !picked.dat) picked.dat = await buf();
   }
@@ -355,10 +356,8 @@ async function refreshReplayList() {
   const sel = ui.replayList, keep = sel.value;
   sel.length = 0;
   sel.add(new Option(replayIndex.length ? `${replayIndex.filter(e => !/\.(pud|w2c)$/i.test(e.name)).length} in replays/…` : 'replays/ is empty', ''));
-  const two = n => String(n).padStart(2, '0');
-  const when = t => { if (!t) return ''; const d = new Date(t * 1000); return ` · ${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`; };
   const kb = n => n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
-  for (const e of replayIndex) sel.add(new Option(`${e.name}${when(e.mtime)}${e.size ? ' · ' + kb(e.size) : ''}`, e.name));
+  for (const e of replayIndex) sel.add(new Option(`${e.name}${e.size ? ' · ' + kb(e.size) : ''}`, e.name));
   sel.value = replayIndex.some(e => e.name === keep) ? keep : '';
   ui.listBox.hidden = false;
 }
@@ -401,7 +400,7 @@ async function fetchMap(name) {
 async function loadFromList(name) {
   const url = n => 'replays/' + n.split('/').map(encodeURIComponent).join('/');
   const get = async n => { const r = await fetch(url(n), { cache: 'no-store' }); if (!r.ok) throw new Error(`cannot fetch replays/${n} (${r.status})`); return new Uint8Array(await r.arrayBuffer()); };
-  const file = (n, b) => ({ name: n.split('/').pop(), arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
+  const file = (n, b) => ({ name: n.split('/').pop(), listName: n, arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
   setStatus(`Loading replays/${name}…`);
   const b = await gunzipIf(await get(name)), fl = [file(name, b)];
   let map = '';
@@ -460,7 +459,6 @@ async function startSession(intro) {
   const m = st.session.mem();
   st.tileset = loadTileset(n => st.mpq.read(n), m);
   st.tickMs = tickMs(m);
-  st.sounds = soundNames(m);
   audio.setGame(n => st.mpq.read(n), m);
   st.sprites = null;
   try {
@@ -487,27 +485,99 @@ async function startSession(intro) {
   applyFog(); mic.picked.clear();   // a new replay: fog "all", no microphones picked
   ui.seek.max = Math.max(1, st.totalTurns - 1);
   ui.controls.hidden = false;
-  ui.log.textContent = '';
   const mapKey = `${st.match ? st.match.mapName : ''}|${m.r16(A.MapSize)}|${m.r8(A.Tileset)}`;
   if (st.camMapKey === mapKey && st.freeCam0) { st.view.scale = st.freeCam0.scale; centreOn(st.freeCam0.x, st.freeCam0.y); }
   else centreOnLocal();   // new map: start on the recording player's base
   st.camMapKey = mapKey;
   st.lobby = st.match ? lobbyInfo(st.match, m, st.art, i => st.tileset.rgb[i] || [128, 128, 128]) : null;
+  if (st.lobby) for (const sl of st.lobby.slots) { sl.cam = st.cam.tracks.has(sl.p); sl.mic = !!(mic.chunks.get(sl.p) || []).length; }
+  if (st.lobby) st.lobby.rules = rulesName(picked.converted ? picked.converted.rules : st.session.rules).replace(/ rules$/, '');
   st.lobbyBtn = st.lobby ? lobbyStartButton(st.art, st.lobby) : null;
   maybeLobby();
   ui.save.hidden = !picked.converted;
   const conv = picked.converted ? ` (converted: ${picked.converted.info.peers.length} players, ${picked.converted.stats.moved} commands placed by sync byte)` : '';
   const rn = picked.converted ? st.rulesNote : rulesName(st.session.rules) + (st.session.rules !== st.session.mtchRules ? ` (the file says ${rulesName(st.session.mtchRules)})` : '');
   const noAlt = st.session.rules && !(picked.plugin && picked.plugin.wav) ? '; add plugin/peon2k.w2p for its sound' : '';
-  const cams = camNote();
-  setStatus(`${picked.replayName}: ${st.session.pudName.replace(/^.*[\\/]/, '')}, tileset ${st.tileset.names[0].split('\\')[2]}, ${st.totalTurns} turns${conv}, ${rn}${noAlt}${cams ? '; ' + cams : ''}${st.sprites ? '' : ' (no sprites.js: boxes)'}.`);
+  setStatus(`${picked.replayName}: ${st.session.pudName.replace(/^.*[\\/]/, '')}, tileset ${st.tileset.names[0].split('\\')[2]}, ${st.totalTurns} turns${conv}, ${rn}${noAlt}${st.sprites ? '' : ' (no sprites.js: boxes)'}.`);
   if (!st.looping) { st.looping = true; requestAnimationFrame(frame); }
-  const q = new URLSearchParams(location.search);   // dev: ?turn=N&fog=P&play=1
-  if (q.get('fog')) { ui.fog.value = q.get('fog'); ui.fog.onchange(); }
-  if (q.get('pview')) setPlayerView(true);
-  if (q.get('turn')) await seekTo(+q.get('turn'));
-  if (q.get('play')) setPlaying(true);
+  ui.shareBox.hidden = !picked.listName;
+  await applyUrlState();
 }
+// ---- shared links (Share button): ?replay=<name in replays/>&turn=&x=&y=&zoom=&fog=&nofog=1&follow=1&pview=1&mics=&micfollow=0
+// (also the dev params turn / fog / pview / play with ?load=). Applied once, to the first replay that loads (and, with
+// replay=, only when it is that one), so picking another replay afterwards starts normally.
+let urlState = new URLSearchParams(location.search);
+async function applyUrlState() {
+  const q = urlState; if (!q) return;
+  if (q.get('replay') && q.get('replay') !== picked.listName) return;
+  urlState = null;
+  const cover = $('cover'), coverText = $('coverText');
+  const num = k => q.get(k) !== null && q.get(k) !== '' && Number.isFinite(+q.get(k)) ? +q.get(k) : null;
+  if (q.get('fog') && [...ui.fog.options].some(o => o.value === q.get('fog'))) { ui.fog.value = q.get('fog'); ui.fog.onchange(); }
+  if (q.get('pview')) setPlayerView(true);
+  if (num('turn') !== null) {
+    const to = Math.max(0, Math.min(st.totalTurns - 1, num('turn')));
+    if (to > 0) { cover.hidden = false; coverText.textContent = `Going to ${fmtTime(to * 2 * st.tickMs)}…`; }
+    await seekTo(to, f => { coverText.textContent = `Going to ${fmtTime(to * 2 * st.tickMs)}… ${Math.round(100 * f)}%`; });
+  }
+  if (q.get('nofog') === '1' && watched() >= 0) { st.noFog = true; applyFog(); }
+  if (num('zoom')) st.view.scale = Math.max(0.25, Math.min(8, num('zoom'))) * (window.devicePixelRatio || 1);
+  if (num('x') !== null && num('y') !== null) { freeRelease(); centreOn(num('x'), num('y')); }
+  if (q.get('follow') === '1' && watched() >= 0) { if (st.pv.on) pvFollow(); else { st.free.follow = true; updateWatchButtons(); } }
+  if (q.get('micfollow') === '0') { ui.micLink.checked = false; ui.micLink.onchange(); }
+  if (q.get('mics') !== null) { mic.picked = new Set(q.get('mics').split(',').filter(Boolean).map(Number).filter(p => p >= 0 && p < 8)); drawPlayers(st.session.mem()); }
+  cover.hidden = true;
+  // a shared link plays from its moment and pauses once after `pause` seconds of game time (0: plays on; -1: stays paused)
+  const sec = num('pause');
+  if (sec !== null && sec >= 0) {
+    setPlaying(true);
+    if (sec > 0) st.pauseAtTick = st.session.tick + Math.round(sec * 1000 / st.tickMs);
+  } else if (sec === null && q.get('play')) setPlaying(true);
+}
+function autoPause() {   // from the playback loop
+  if (st.pauseAtTick == null || st.session.tick < st.pauseAtTick) return;
+  setPlaying(false); toast('Paused — press Play to go on');
+}
+function shareUrl() {
+  const q = new URLSearchParams(), c = st.viewWant || viewCentre(), d = window.devicePixelRatio || 1;
+  q.set('replay', picked.listName);
+  q.set('turn', String(st.session.turn));   // seekTo(turn) lands on this exact state
+  q.set('x', String(Math.round(c.x))); q.set('y', String(Math.round(c.y)));
+  q.set('zoom', String(+(st.view.scale / d).toFixed(3)));
+  if (watched() >= 0) q.set('fog', String(watched()));
+  if (st.noFog) q.set('nofog', '1');
+  if (following()) q.set('follow', '1');
+  if (st.pv.on) q.set('pview', '1');
+  if (mic.picked.size) q.set('mics', [...mic.picked].sort((a, b) => a - b).join(','));
+  if (!ui.micLink.checked) q.set('micfollow', '0');
+  q.set('pause', String(Math.max(-1, Math.round(+ui.pauseAfter.value || 0))));
+  const rules = picked.converted ? picked.converted.rules : st.session.rules;
+  if (rules != null) q.set('rules', String(rules));
+  return `${location.origin}${location.pathname}?${q}`;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch { /* insecure context or denied: the old way */ }
+  const ta = Object.assign(document.createElement('textarea'), { value: t }); ta.style.cssText = 'position:fixed;opacity:0';
+  document.body.append(ta); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch { /* none */ } ta.remove();
+  return ok;
+}
+try { const v = localStorage.getItem('w2v.pauseAfter'); if (v !== null && v !== '') ui.pauseAfter.value = v; } catch { /* private window */ }
+ui.pauseAfter.onchange = () => { try { localStorage.setItem('w2v.pauseAfter', String(Math.max(-1, Math.round(+ui.pauseAfter.value || 0)))); } catch { /* private window */ } };
+$('share').onclick = async () => {
+  if (!st.session || !picked.listName) return;
+  const u = shareUrl();
+  if (await copyText(u)) toast('Link copied to the clipboard'); else setStatus(`Link: ${u}`);
+};
+// rules= (the Rules selector is hidden): one of its values, else auto
+if (urlState.get('rules') && [...ui.rules.options].some(o => o.value === urlState.get('rules'))) ui.rules.value = urlState.get('rules');
+// a shared link: load its replay from the list once the game files and the list are there
+if (urlState.get('replay')) (async () => {
+  if (urlState.get('turn') && urlState.get('turn') !== '0') $('cover').hidden = false;   // no lobby flash before the jump
+  await autoGame; await refreshReplayList();
+  if (!picked.exe || !picked.dat) { $('cover').hidden = true; setStatus(`This link opens replays/${urlState.get('replay')}: pick the game files first (Warcraft II BNE.exe, War2Dat.mpq).`); return; }
+  ui.replayList.value = urlState.get('replay');
+  try { await loadFromList(urlState.get('replay')); } catch (e) { reportError(e); }
+})();
 
 // ---------------------------------------------------------------- intro / outro screens
 let screenCanvas = null;
@@ -574,10 +644,15 @@ function screenFallbackLines() {
 function drawScreen(ctx, W, H) {
   ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 0, W, H);
   if (st.screen.img) {
-    const k = Math.min(W / 640, H / 480), w = Math.round(640 * k), h = Math.round(480 * k);
+    // between the top bar and a floating timeline when they show, so neither covers the screen (its Start button)
+    const d = window.devicePixelRatio || 1, wr = ui.wrap.getBoundingClientRect(), vis = el => !el.hidden && getComputedStyle(el).opacity > 0.5 && el.offsetHeight;
+    const top = !narrow.matches && vis(ui.bar) ? Math.max(0, (ui.bar.getBoundingClientRect().bottom - wr.top + 8) * d) : 0;
+    const cr = ui.controls.getBoundingClientRect(), bot = !narrow.matches && vis(ui.controls) && cr.top < wr.bottom ? Math.max(0, (wr.bottom - cr.top + 8) * d) : 0;
+    const AH = Math.max(H / 2, H - top - bot), k = Math.min(W / 640, AH / 480), w = Math.round(640 * k), h = Math.round(480 * k);
+    const x = Math.round((W - w) / 2), y = Math.round(top + (AH - h) / 2);
     ctx.imageSmoothingEnabled = k < 1;
-    ctx.drawImage(st.screen.img, 0, 0, 640, 480, Math.round((W - w) / 2), Math.round((H - h) / 2), w, h);
-    st.screen.rect = { x: Math.round((W - w) / 2), y: Math.round((H - h) / 2), k };
+    ctx.drawImage(st.screen.img, 0, 0, 640, 480, x, y, w, h);
+    st.screen.rect = { x, y, k };
     return;
   }
   const d = window.devicePixelRatio || 1, lines = screenFallbackLines();
@@ -632,7 +707,7 @@ function pvHandle(ev) {
   for (const x of out.sounds) if (x.player === p && (env.pview || x.kind === 'notify' || audio.settings.voices)) audio.playUi(m.r8(A.PlayerRace + p), x.id);
 }
 
-function stepTurn(log = true) {
+function stepTurn() {
   const s = st.session;
   if (s.ended) return false;
   const r = s.step();
@@ -640,26 +715,26 @@ function stepTurn(log = true) {
   st.tracker.after(s.mem(), s.turn - 1, s.tick);
   if (s.ended && st.cam.tracks.size) st.tracker.afterEnd(s.tick, new Map([...st.cam.tracks].map(([p, tr]) => [p, tr.endTick])));
   const ev = s.drainHooks();
-  if (log) logEvents(ev);
+  countKills(s, ev);
   audio.handle(ev, audioEnv());
   pvHandle(ev);
   if (r >= 1 && r <= 3) setStatus(`Replay diverged at turn ${s.turn - 1} (status ${r}): the recording does not match this game data.`, true);
   return !s.ended;
 }
 
-async function seekTo(turn) {
+async function seekTo(turn, progress = null) {
   if (st.busy) return;
   st.busy = true;
   const wasPlaying = st.playing; setPlaying(false);
   try {
-    if (turn < st.session.turn) { await boot(); ui.log.textContent = ''; }
+    if (turn < st.session.turn) await boot();
     if (st.screen) st.screen = null;              // a seek hides the lobby / closes the outro (shown again at the end)
     st.outroClosed = false;
     if (turn === 0) { st.busy = false; maybeLobby(); return; }
     const t0 = performance.now();
     while (st.session.turn < turn && !st.session.ended) {
-      for (let k = 0; k < 500 && st.session.turn < turn && stepTurn(turn - st.session.turn < 50); k++);
-      if (performance.now() - t0 > 30) { updateClock(); await new Promise(r => setTimeout(r, 0)); }
+      for (let k = 0; k < 500 && st.session.turn < turn && stepTurn(); k++);
+      if (performance.now() - t0 > 30) { updateClock(); if (progress) progress(st.session.turn / turn); await new Promise(r => setTimeout(r, 0)); }
     }
   } catch (e) { setStatus(e.message, true); }
   st.busy = false;
@@ -667,7 +742,7 @@ async function seekTo(turn) {
 }
 
 // ---------------------------------------------------------------- playback loop
-function setPlaying(on) { st.playing = !!(on && st.session && !st.session.ended); ui.play.textContent = st.playing ? 'Pause' : 'Play'; st.budget = 0; }
+function setPlaying(on) { if (!on) st.pauseAtTick = null; st.playing = !!(on && st.session && !st.session.ended); ui.play.firstElementChild.firstElementChild.setAttribute('href', st.playing ? '#i-pause' : '#i-play'); ui.play.setAttribute('aria-label', st.playing ? 'Pause' : 'Play'); document.body.classList.toggle('playing', st.playing); st.budget = 0; wake(); }
 function playPressed() {
   if (lobbyUp()) { startFromLobby(); return; }
   closeScreen();
@@ -723,12 +798,12 @@ function setPlayerView(on) {
     if ([...ui.fog.options].some(o => o.value === st.freeCam.fog)) { ui.fog.value = st.freeCam.fog; applyFog(); }
   }
 }
-// The inspect card floats over the game screen in the player view (which hides the side panel). On a phone it is
-// a sheet over the bottom of the free view instead (the side panel is below the fold), and in the player view,
+// The inspect card floats over the map, out of the players panel. On a phone it is a sheet over the bottom of the
+// free view instead (the side panel is below the fold), and in the player view,
 // whose 4:3 screen is short, the side panel stays below it and holds the card.
 const narrow = matchMedia('(max-width: 760px)');
 function placeInspect() {
-  const float = narrow.matches ? !st.pv.on : st.pv.on;
+  const float = narrow.matches ? !st.pv.on : true;   // desktop: always a card over the map, left of the players panel
   if (float) ui.wrap.append(ui.inspect); else $('players').before(ui.inspect);
   ui.inspect.classList.toggle('float', float);
 }
@@ -778,6 +853,7 @@ ui.camShow.onchange = () => { st.pv.camRec = true; };
 window.addEventListener('keydown', e => {
   if (!st.session || e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
   if (e.key === ' ') { e.preventDefault(); playPressed(); }
+  else if (!e.ctrlKey && !e.metaKey && !e.altKey && HUD_KEYS[e.key.toLowerCase()]) HUD_KEYS[e.key.toLowerCase()]();
   else if (e.key === 'Escape' && st.inspect) { st.inspect = null; drawInspect(st.session.mem()); }
   else if (e.key === '.') stepPressed();
   else if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey && !lobbyUp()) setPlayerView(!st.pv.on);
@@ -802,6 +878,7 @@ window.addEventListener('keydown', e => {
 function frame(t) {
   requestAnimationFrame(frame);
   if (!st.session || st.loading) return;
+  document.body.classList.toggle('screenUp', !!st.screen);   // lobby / end screen: the floating panels step aside
   const dt = st.lastT ? Math.min(250, t - st.lastT) : 0; st.lastT = t;
   if (st.screen && st.screen.kind === 'intro') { st.budget = 0; }
   else if (st.playing && !st.busy) {
@@ -820,6 +897,7 @@ function frame(t) {
     st.renderer.advancePalette(st.speed === 0 ? (st.session.tick - tick0) * st.tickMs : dt * st.speed, st.session.mem());
     if (st.session.tick !== tick0) st.stepClock = { from: g0, t: t0 };
     if (st.session.ended) setPlaying(false);
+    autoPause();
   }
   if (st.session.ended && !st.busy && !st.screen && !st.outroClosed && st.tracker && st.match) showScreen('outro');
   micFocus();
@@ -831,8 +909,10 @@ function frame(t) {
 function fmtTime(ms) { const s = Math.floor(ms / 1000); return `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor(s / 60) % 60).padStart(Math.floor(s / 3600) ? 2 : 1, '0')}:${String(s % 60).padStart(2, '0')}`; }
 function updateClock() {
   const s = st.session;
-  ui.clock.textContent = `turn ${Math.max(0, s.turn - 1)}/${st.totalTurns - 1} · tick ${s.tick} · ${fmtTime(s.tick * st.tickMs)}${s.ended ? ' · end' : ''}`;
+  const html = `<b>${fmtTime(s.tick * st.tickMs)}</b>turn ${Math.max(0, s.turn - 1)}/${st.totalTurns - 1} · tick ${s.tick}${s.ended ? ' · end' : ''}`;
+  if (html !== ui.clock._html) ui.clock.innerHTML = ui.clock._html = html;
   if (document.activeElement !== ui.seek) ui.seek.value = s.turn;
+  seekFill();
 }
 
 // ---------------------------------------------------------------- view
@@ -1035,6 +1115,7 @@ function draw() {
   lastDraw = performance.now();
   if (st.free.follow && watched() >= 0 && !st.screen) freeFollowStep(m, st.busy ? 0 : dt);
   clampView();
+  placeSides();
   st.renderer.draw(ctx, W, H, st.view, m, st.fog);
   { const iu = inspectedUnit(m); if (iu && !st.screen) inspectBox(ctx, m, iu, st.view.x, st.view.y, st.view.scale, 0, 0); }
   if (st.screen && updateScreen()) drawScreen(ctx, W, H);
@@ -1072,6 +1153,22 @@ function inspectBox(ctx, m, u, vx, vy, s, ox, oy) {
   ctx.lineWidth = Math.max(1, s); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.strokeRect(X - ctx.lineWidth, Y - ctx.lineWidth, w + 2 * ctx.lineWidth, h + 2 * ctx.lineWidth);
   ctx.strokeStyle = '#fff'; ctx.strokeRect(X, Y, w, h);
 }
+// Kills and razings per unit (inspect card): the sim's HK_KILL (killing blows of Unit_ApplyDamage, Peon2k caster kills)
+// of other players' units / buildings, as the game's kills / razings stats split them (neutral critters do not count). By unit slot; an entry goes when its unit dies or the slot is freed (checked every turn), so a new unit in a
+// reused slot starts at 0. A fresh session (seek back) counts again from the start.
+const kills = { session: null, by: new Map(), razed: new Map() };
+function countKills(s, ev) {
+  if (kills.session !== s) { kills.session = s; kills.by.clear(); kills.razed.clear(); }
+  const m = s.mem();
+  for (const map of [kills.by, kills.razed]) for (const [a] of map) if (m.r16(a + 0x1e) & 3) map.delete(a);
+  for (const e of ev) {
+    if (e.kind !== HK.KILL) continue;
+    kills.by.delete(e.b); kills.razed.delete(e.b);
+    if (e.d === m.r8(e.a + 0x2c) || e.d >= 8) continue;
+    const map = m.r32(A.TypeFlags + 4 * e.c) & 0x20 ? kills.razed : kills.by;
+    map.set(e.a, (map.get(e.a) || 0) + 1);
+  }
+}
 function drawInspect(m) {
   const esc = x => String(x).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
   const el = ui.inspect, r = st.inspect;
@@ -1080,7 +1177,8 @@ function drawInspect(m) {
   let html;
   if (alive === 'gone') html = `<div class="inspHead"><span>${esc(st.inspectName || 'Unit')}</span><button class="inspX" title="Close (Esc)">×</button></div><div class="inspNote">no longer exists</div>`;
   else {
-    const I = unitInfo(m, r.addr, { tbl: st.pv.art && st.pv.art.statTxt, tickMs: st.tickMs, names: st.pv.names, extended: !!m.r32(A.Extended) });
+    const I = unitInfo(m, r.addr, { tbl: st.pv.art && st.pv.art.statTxt, tickMs: st.tickMs, names: st.pv.names, extended: !!m.r32(A.Extended),
+      kills: kills.session === st.session ? kills.by.get(r.addr) || 0 : null, razings: kills.razed.get(r.addr) || 0 });
     st.inspectName = I.name;
     const c = I.owner < 8 ? st.tileset.rgb[m.r8(A.PlayerColor + I.owner)] || [128, 128, 128] : [160, 160, 160];
     const hpf = I.maxHp ? Math.min(1, I.hp / I.maxHp) : 0, hpc = hpf > 0.5 ? '#2c2' : hpf > 0.25 ? '#dc2' : '#d22';
@@ -1098,7 +1196,12 @@ function drawInspect(m) {
 function drawPlayers(m) {
   const units = readUnits(m), html = [];
   const ended = st.session.ended && st.tracker;
+  const w = watched(), cnt = unitCounts(m);   // workers / other units / buildings, also inside buildings and transports
+  const title = w >= 0 ? 'Player' : 'Players';
+  if ($('sideTitle').textContent !== title) $('sideTitle').textContent = title;
   for (const p of readPlayers(m, units)) {
+    if (w >= 0 && p.id !== w) continue;   // a watched player: only its card (9 / fog "all": everybody)
+    const k = cnt[p.id];
     const c = st.tileset.rgb[p.colorIdx] || [128, 128, 128];
     const ps = playerStats(m, p.id);   // the game's running stats (g_Stat*), as on the end screen
     const oc = ended && st.tracker.players.includes(p.id) ? OUTCOME_TEXT[outcome(m, p.id, st.tracker.left).kind] : '';
@@ -1107,13 +1210,137 @@ function drawPlayers(m) {
       ? ` <button class="micBtn${mic.talking.has(p.id) ? ' talk' : ''}${on ? ' on' : ''}" data-mic="${p.id}" aria-pressed="${on}" title="${on ? 'Stop listening to' : 'Listen to'} this player's microphone${why}">mic</button>` : '';
     html.push(`<div class="player${p.defeated ? ' out' : ''}"><span class="sw" style="background:rgb(${c})"></span>
       <span class="nm">${esc(p.name || `Player ${p.id + 1}`)}${mb}</span><span class="meta">${p.raceName} · ${p.colorName}${p.ctrl ? ' · ' + p.ctrlName : ''}${p.defeated ? ' · defeated' : ''}${oc ? ' · ' + oc.replace('!', '') : ''}</span>
-      <span class="res"><span>gold ${p.gold}</span><span>lumber ${p.lumber}</span><span>oil ${p.oil}</span><span>food ${p.food}/${p.foodMax}</span>
-      <span>units ${p.liveUnits}</span><span>buildings ${p.liveBldgs}</span></span>
-      <span class="res stats"><span>score ${ps.score}</span><span>kills ${ps.kills}</span><span>razings ${ps.razed}</span>
-      <span title="units produced, including lost ones (the end screen's Units column)">units made ${ps.units}</span><span title="buildings produced, including lost ones">buildings made ${ps.bldgs}</span></span></div>`);
+      <span class="res"><span><i style="background:#e8c547"></i><b>${p.gold}</b></span><span><i style="background:#5f9a45"></i><b>${p.lumber}</b></span><span><i style="background:#4b5563"></i><b>${p.oil}</b></span>
+      <span>peons <b>${k.p}</b></span><span>units <b>${k.u}</b></span><span>buildings <b>${k.b}</b></span><span>food <b>${p.food}/${p.foodMax}</b></span></span>
+      <span class="res stats"><span>score <b>${ps.score}</b></span><span>kills <b>${ps.kills}</b></span><span>razings <b>${ps.razed}</b></span>
+      <span title="units produced, including lost ones (the end screen's Units column)">units made <b>${ps.units}</b></span><span title="buildings produced, including lost ones">buildings made <b>${ps.bldgs}</b></span></span></div>`);
   }
   ui.players.innerHTML = html.join('');
+  drawScore(m, units);
 }
+// ---- score strip (left): the first half of the players is team 1, the rest team 2 (the odd one goes to team 1);
+// alliances are ignored (players ally with an enemy for a moment so a right-click into the dark does not attack).
+// Per player p = workers (peasants / peons, also inside mines and transports), u = other units, b = buildings.
+// A click watches that player (as keys 1-8), a second click goes back to fog "all".
+const WORKERS = new Set([2, 3, 16, 17]);
+function unitCounts(m) {
+  const base = m.r32(A.Units), n = m.r32(A.UnitCount), c = Array.from({ length: 16 }, () => ({ p: 0, u: 0, b: 0 }));
+  for (let i = 0; i < n; i++) {
+    const u = base + 0x98 * i;
+    if (m.r16(u + 0x1e) & 3) continue;   // free / dead
+    const t = m.r8(u + 0x27), k = c[m.r8(u + 0x2c) & 15];
+    if (m.r32(A.TypeFlags + 4 * t) & 0x20) k.b++; else if (WORKERS.has(t)) k.p++; else k.u++;
+  }
+  return c;
+}
+function drawScore(m, units) {
+  const ps = readPlayers(m, units), w = watched(), cnt = unitCounts(m), half = Math.ceil(ps.length / 2);
+  const card = p => {
+    const c = st.tileset.rgb[p.colorIdx] || [128, 128, 128], k = cnt[p.id];
+    return `<div class="pc${p.defeated ? ' out' : ''}${p.id === w ? ' sel' : ''}${mic.talking.has(p.id) ? ' talk' : ''}" style="--c:rgb(${c})" data-p="${p.id}" title="${esc(p.name || `Player ${p.id + 1}`)}: ${p.raceName}, ${p.colorName} (key ${p.id + 1}). p workers, u other units, b buildings">` +
+      `<span class="n">${esc(p.name || `Player ${p.id + 1}`)}</span><span class="s"><b>${k.p}</b>p <b>${k.u}</b>u <b>${k.b}</b>b</span></div>`;
+  };
+  const html = [ps.slice(0, half), ps.slice(half)].filter(t => t.length)
+    .map((t, i) => `<div class="team"><span class="tl">Team ${i + 1}</span>${t.map(card).join('')}</div>`).join('');
+  if (html !== ui.score._html) { ui.score.innerHTML = ui.score._html = html; ui.score.hidden = !ps.length; }
+}
+ui.score.addEventListener('click', e => {
+  const c = e.target.closest('[data-p]'); if (!c || !st.session) return;
+  const v = c.dataset.p === ui.fog.value && !st.pv.on ? '-1' : c.dataset.p;
+  ui.fog.value = v; ui.fog.onchange(); drawPlayers(st.session.mem());
+});
+// ---- one HUD column: score strip at the top, the players panel below it, the minimap at the bottom. When the panel
+// does not fit between them it goes to the edge (top) and the score strip moves next to it, towards the centre.
+// The column sits on the left and moves to the right edge while the view is at the map's left edge, so it does not
+// cover it; back when the view leaves it or reaches the right edge (body.flip). 96 px of hysteresis keeps it from
+// jumping at the threshold; while the minimap is dragged it waits for the release.
+// M picks the side: auto (as above), always left, always right.
+const miniCard = $('miniCard');
+let hudW = 0, hudSide = 'auto';
+try { hudSide = ['left', 'right'].includes(localStorage.getItem('w2v.side')) ? localStorage.getItem('w2v.side') : 'auto'; } catch { /* private window */ }
+function placeSides() {
+  if (narrow.matches) { placeHud(); return; }
+  if (hudSide !== 'auto') document.body.classList.toggle('flip', hudSide === 'right');
+  else if (!miniDrag) {
+    const d = window.devicePixelRatio || 1, k = st.view.scale / d, W = ui.view.width / d;
+    const L = -st.view.x * k, R = L + mapPx() * k, P = hudW + 12;
+    const on = document.body.classList.contains('flip');
+    if (!on && L > -P && R > W + P) document.body.classList.add('flip');
+    else if (on && (L < -P - 96 || R < W + P - 96)) document.body.classList.remove('flip');
+  }
+  placeHud();
+}
+function placeHud() {
+  if (narrow.matches || st.pv.on) { ui.side.style.cssText = ui.score.style.cssText = ''; ui.side._k = ui.score._k = ''; return; }
+  const flip = document.body.classList.contains('flip'), near = flip ? 'right' : 'left', far = flip ? 'left' : 'right';
+  const panel = !document.body.classList.contains('sideMin'), Hs = ui.score.offsetHeight;   // 0 while hidden
+  const bottom = miniCard.getBoundingClientRect().top - 52;   // above the minimap's button row
+  const stack = !panel || 12 + (Hs && Hs + 8) + ui.side.scrollHeight <= bottom, top = stack ? 12 + (Hs && Hs + 8) : 12;
+  const sw = panel ? ui.side.offsetWidth : 0, cw = ui.score.offsetWidth;
+  const set = (el, css) => { if (el._k !== css) { el.style.cssText = css; el._k = css; } };
+  set(ui.side, `${near}: 12px; ${far}: auto; top: ${top}px; max-height: ${Math.max(120, bottom - top)}px;`);
+  set(ui.score, `${near}: ${stack ? 12 : 12 + sw + 8}px; ${far}: auto;`);
+  hudW = Math.max(miniCard.offsetWidth, stack ? Math.max(sw, cw) : sw + 8 + cw);
+}
+// ---- the players panel can be folded away (Y, or its button above the minimap); remembered per browser
+function setSideMin(on) {
+  document.body.classList.toggle('sideMin', on); ui.sideOpen.classList.toggle('on', !on); ui.sideOpen.setAttribute('aria-pressed', String(!on));
+  try { localStorage.setItem('w2v.sideMin', on ? '1' : ''); } catch { /* private window */ }
+  if (st.session) placeHud();
+}
+ui.sideOpen.onclick = () => setSideMin(!document.body.classList.contains('sideMin'));
+try { if (localStorage.getItem('w2v.sideMin')) setSideMin(true); } catch { /* private window */ }
+// ---- score strip on / off and the timeline's mode (auto / show / hide), buttons above the minimap; remembered
+const scoreBtn = $('scoreBtn'), seekBtn = $('seekBtn');
+const SEEK_MODES = { auto: ['show', 'Timeline: auto (fades while playing)'], show: ['hide', 'Timeline: always shown, under the map'], hide: ['auto', 'Timeline: hidden'] };
+function setScoreShown(on) {
+  document.body.classList.toggle('noScore', !on); scoreBtn.classList.toggle('on', on); scoreBtn.setAttribute('aria-pressed', String(on));
+  try { localStorage.setItem('w2v.noScore', on ? '' : '1'); } catch { /* private window */ }
+}
+function setSeekMode(mode) {
+  if (!SEEK_MODES[mode]) mode = 'auto';
+  document.body.classList.toggle('seek-show', mode === 'show'); document.body.classList.toggle('seek-hide', mode === 'hide');
+  seekBtn.dataset.mode = mode; seekBtn.title = `${SEEK_MODES[mode][1]} — click / T: ${SEEK_MODES[SEEK_MODES[mode][0]][1].replace('Timeline: ', '')}`;
+  try { localStorage.setItem('w2v.seek', mode); } catch { /* private window */ }
+  wake();
+}
+scoreBtn.onclick = () => setScoreShown(document.body.classList.contains('noScore'));
+seekBtn.onclick = () => setSeekMode(SEEK_MODES[seekBtn.dataset.mode][0]);
+try { setScoreShown(!localStorage.getItem('w2v.noScore')); setSeekMode(localStorage.getItem('w2v.seek') || 'auto'); } catch { setSeekMode('auto'); }
+// ---- keys: T timeline mode, S score strip, Y players panel, X full screen, M panels' side (auto / left / right)
+let toastTimer = 0;
+function toast(text) {
+  ui.toast.textContent = text; ui.toast.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { ui.toast.hidden = true; }, 1200);
+}
+const HUD_KEYS = {
+  t: () => { setSeekMode(SEEK_MODES[seekBtn.dataset.mode][0]); toast(SEEK_MODES[seekBtn.dataset.mode][1]); },
+  s: () => { const on = document.body.classList.contains('noScore'); setScoreShown(on); toast(on ? 'Score strip shown' : 'Score strip hidden'); },
+  y: () => { const on = document.body.classList.contains('sideMin'); setSideMin(!on); toast(on ? 'Players panel shown' : 'Players panel hidden'); },
+  x: () => fullBtn.click(),
+  m: () => {
+    hudSide = { auto: 'left', left: 'right', right: 'auto' }[hudSide];
+    try { localStorage.setItem('w2v.side', hudSide); } catch { /* private window */ }
+    toast(`Panels: ${hudSide === 'auto' ? 'auto (away from the map edge)' : hudSide}`);
+  },
+};
+// ---- full screen (timeline button); hidden where the page cannot go full screen (iPhone Safari)
+const fullBtn = $('fullBtn');
+fullBtn.hidden = !document.fullscreenEnabled;
+fullBtn.onclick = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
+document.addEventListener('fullscreenchange', () => fullBtn.firstElementChild.firstElementChild.setAttribute('href', document.fullscreenElement ? '#i-unfull' : '#i-full'));
+// ---- timeline fill and the idle fade: while playing, the top bar and the timeline fade after 2.5 s without input
+function seekFill() { ui.seek.style.setProperty('--p', `${100 * (ui.seek.value - ui.seek.min) / ((ui.seek.max - ui.seek.min) || 1)}%`); }
+ui.seek.addEventListener('input', seekFill);
+var idleTimer;   // var: setPlaying / setSeekMode may wake() before this line runs
+function wake() {
+  document.body.classList.remove('idle'); clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    const over = document.querySelector('#controls:hover, #bar:hover, #side:hover, select:focus');
+    if (st.playing && !over && !narrow.matches) document.body.classList.add('idle'); else wake();   // (a docked timeline stays: CSS)
+  }, 2500);
+}
+for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel']) addEventListener(ev, wake, { passive: true });
 const esc = s => s.replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
 ui.players.addEventListener('click', e => {
   const b = e.target.closest('[data-mic]'); if (!b) return;
@@ -1133,38 +1360,4 @@ function drawTalkers() {
     const c = st.tileset.rgb[m.r8(A.PlayerColor + p)] || [200, 200, 200];
     return `<span${mic.audible(p) ? '' : ' class="quiet" title="not listening (mic button in the players list)"'}><i style="background:rgb(${c.join(',')})"></i>${esc(st.pv.names[p] || `Player ${p + 1}`)}</span>`;
   }).join('');
-}
-mic.onSpeech = (p, c) => appendLog([`<div class="k-mic"><span class="t">${fmtTime(Math.floor(c.t0) * st.tickMs)}</span>${esc(st.pv.names[p] || `Player ${p + 1}`)} talks (${c.dur.toFixed(1)} s)</div>`]);
-
-// ---------------------------------------------------------------- event log (hook ring, w2hooks.h)
-const HK = { SOUND: 1, VOICE_SELECT: 2, VOICE_ACK: 3, STATUS_MSG: 4, MSG_TIMED: 5, STATUS_LINE: 6, ALERT: 8, MUSIC: 12 };
-function logEvents(evs) {
-  if (!evs.length) return;
-  const m = st.session.mem(), lines = [];
-  for (const e of evs) {
-    let cls, text;
-    switch (e.kind) {
-      case HK.SOUND: if (!ui.logSounds.checked) continue; cls = 'snd'; text = `sound ${(st.sounds[e.a - 1] || '#' + e.a).replace(/^.*\\/, '')}`; break;
-      case HK.VOICE_SELECT: case HK.VOICE_ACK: {
-        if (!ui.logVoices.checked) continue;
-        const type = e.kind === HK.VOICE_ACK ? e.b : e.c;
-        cls = 'voice'; text = `${e.kind === HK.VOICE_ACK ? 'acknowledge' : 'selected'}: ${UNIT_NAMES[type] || 'type ' + type}`; break;
-      }
-      case HK.STATUS_MSG: case HK.MSG_TIMED:   // HKM_OTHER: another player's own message (listed when viewing it)
-        if (e.kind === HK.STATUS_MSG && (e.d & 0x100) && +ui.fog.value !== (e.d & 7)) continue;
-        cls = 'msg'; text = m.cstr(e.a, 120); break;
-      case HK.STATUS_LINE: cls = 'msg'; text = e.a > 0x400000 ? m.cstr(e.a, 120) : `status line #${e.a}`; break;
-      case HK.ALERT: cls = 'alert'; text = `alert at ${e.a},${e.b}`; break;
-      default: continue;
-    }
-    lines.push(`<div class="k-${cls}"><span class="t">${fmtTime(e.tick * st.tickMs)}</span>${esc(text)}</div>`);
-  }
-  appendLog(lines);
-}
-function appendLog(lines) {
-  if (!lines.length) return;
-  const atBottom = ui.log.scrollTop + ui.log.clientHeight >= ui.log.scrollHeight - 4;
-  ui.log.insertAdjacentHTML('beforeend', lines.join(''));
-  while (ui.log.childElementCount > 400) ui.log.firstElementChild.remove();
-  if (atBottom) ui.log.scrollTop = ui.log.scrollHeight;
 }

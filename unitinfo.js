@@ -1,6 +1,6 @@
 // Click-to-inspect: the unit / building under the pointer and its stats, read from the arena (presentation only).
 //
-// What the game's status panel shows (Ui_StatusPanel per-type table 0x4a3d58 {u16 icon, u16 frame, fn redraw,
+// What the game's status panel shows (Ui_StatusPanel per-type table 0x4a3d58 16-byte entries {u32, u32, fn redraw,
 // fn info}; labels rez\stat_txt.tbl 411..434), with every value as the sim computes it, for any owner (the game
 // shows the full panel only for g_LocalPlayer's units):
 //   units (Ui_StatusShowUnitInfo2 0x445ba0; archers 0x446b80, ships 0x447840 differ only in the upgrade used):
@@ -35,6 +35,33 @@ const UTF = { Siege: 4, Naval: 8, Building: 0x20, Worker: 0x100, Tanker: 0x200, 
   Caster: 0x20000, OilPatch: 0x200000, GoldMine: 0x400000 };
 const RANGER = 0x12, BERSERKER = 0x13, FARMS = [0x3a, 0x3b], HALLS = [0x4a, 0x4b, 0x58, 0x59, 0x5a, 0x5b];
 const PROD_TICKS_PER_STEP = 5;
+// Level, as the status panel's info fn computes it (Ui_StatusShowLevelText 0x4463d0 prints g_Status_StatValue, which
+// starts at 1): only types whose info fn (table 0x4a3d58, 16 bytes per type, info fn at +12) is one of these three show it.
+//   units 0x445ba0: + melee level (weapons-upgradable types) + armor level (armor-upgradable), and for casters the
+//     spells known (g_SpellsKnown 0x4abefc, u32 per player): paladin +1 (+1 more with bit 2) + bit 8; ogre mage +1
+//     (+1 with 0x800) + 0x40000; mage 0x10 0x40 0x80 0x100 0x200; death knight 0x8000 0x10000 0x20000 0x2000 0x80000
+//   archers 0x446b80: + ranger training + marksmanship + scouting + longbow + missile level (+ armor level)
+//   ships 0x447840: + naval level (UTF_Naval) + ship weapons (weapons-upgradable) + ship armor (armor-upgradable)
+// The level tables are reached through the race-independent pointers at 0x494790.. (indexed by the owner).
+const LEVEL_FN = { 0x445ba0: 'unit', 0x446b80: 'archer', 0x447840: 'ship' };
+const UPGP = { Missile: 0x494790, Melee: 0x494794, Armor: 0x494798, ShipWeapon: 0x49479c, ShipArmor: 0x4947a0, Naval: 0x4947a4,
+  Ranger: 0x4947ac, Longbow: 0x4947b0, Scouting: 0x4947b4, Marksmanship: 0x4947b8 };
+const SPELLS_KNOWN = 0x4abefc, CASTER_LEVEL = { 0x0c: [1, 2, 8], 0x0d: [1, 0x800, 0x40000], 0x0a: [0, 0x10, 0x40, 0x80, 0x100, 0x200],
+  0x0b: [0, 0x8000, 0x10000, 0x20000, 0x2000, 0x80000] };   // [base, spell bits...]
+export function unitLevel(m, u) {
+  const t = m.r8(u + 0x27), own = m.r8(u + 0x2c), kind = LEVEL_FN[m.r32(0x4a3d58 + 16 * t + 12)];
+  if (!kind) return 0;
+  const up = k => m.r8(m.r32(UPGP[k]) + own), wpn = m.r8(T.WeaponsUpg + t), arm = m.r8(T.ArmorUpg + t);
+  let lv = 1;
+  if (kind === 'archer') lv += up('Ranger') + up('Marksmanship') + up('Scouting') + up('Longbow') + up('Missile') + (arm ? up('Armor') : 0);
+  else if (kind === 'ship') lv += (m.r32(A.TypeFlags + 4 * t) & UTF.Naval ? up('Naval') : 0) + (wpn ? up('ShipWeapon') : 0) + (arm ? up('ShipArmor') : 0);
+  else {
+    lv += (wpn ? up('Melee') : 0) + (arm ? up('Armor') : 0);
+    const c = CASTER_LEVEL[t], sp = m.r32(SPELLS_KNOWN + 4 * own);
+    if (c) lv += c[0] + c.slice(1).filter(b => sp & b).length;
+  }
+  return lv;
+}
 const IS_MISSILE_INF = t => t === 8 || t === 9 || t === RANGER || t === BERSERKER;
 
 // sim/gen/w2types.h ACT_* / UPG_*
@@ -105,6 +132,9 @@ export function unitInfo(m, u, o = {}) {
 
   // ---- combat stats (units, and buildings that fight: towers)
   const basic = m.r8(T.Basic + t), pierce = m.r8(T.Pierce + t);
+  const level = unitLevel(m, u);
+  if (level) row(L(411, 'Level'), level);
+  if (o.kills != null && (!building || basic + pierce > 0)) { row('Kills', o.kills); row('Razings', o.razings || 0); }
   if (!building || basic + pierce > 0) {
     let armor = m.r8(T.Armor + t);
     const armorUp = m.r8(T.ArmorUpg + t) ? (tf & UTF.Naval ? lvl(UPG.ShipArmor) * m.r8(MULT.ShipArmor) : lvl(UPG.Armor) * m.r8(MULT.Armor)) : 0;
@@ -129,7 +159,7 @@ export function unitInfo(m, u, o = {}) {
     row(L(415, 'Sight'), `${typeSight}${plus(unitSight - typeSight)}`);
   }
   if (!building) row(L(416, 'Speed'), m.r8(T.Speed + t));
-  if (tf & UTF.Caster) row(L(417, 'Magic'), m.r8(u + 0x26));
+  if (tf & UTF.Caster) row('Mana', m.r8(u + 0x26));
 
   if (!building) {
     // ---- order, load, cargo, spell timers
