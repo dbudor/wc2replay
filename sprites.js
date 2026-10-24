@@ -26,6 +26,8 @@ const A = {
   gfxTilesetTables: 0x49b914, // 4 ptrs -> u16[127] per-tileset overrides (0xffff = keep base)
   missileGfxNames: 0x49b924,  // 29 ptrs -> "Art\\Unit\\Other\\*.grp"
   shadowName: 0x49d7ec,
+  typeBox: 0x4cf36c,         // u16 w, h per type (selection box)
+  charmX: 0x4a48e0,          // s32[5]: x offset of each spell icon
 };
 // Default UDTA gfx tables (g_UdtaObsolete1 0x4cf26c and the 4 tileset overrides its pointers name), as the
 // default unit data loads them.  A PUD with its own UDTA skips them (Data_LoadUnitTables / FUN_004206d0) and the
@@ -37,6 +39,7 @@ const DEFAULT_GFX_TABLES = {
   0x4cfac4: [65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,1182,1183,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,1065,1173,1174,1094,1095,1096,1097,1098,1099,1104,1105,1090,1091,1088,1089,1108,1109,1100,1101,1175,1176,1110,1111,1084,1085,1106,1107,1112,1113,1177,1178,1086,1087,1116,1117,1179,1180,65535,65535,1080,1081,1082,1083,1166,1185,1181,1274,1274,65535,1190,1191,33959,33959,65535,65535,65535,65535,65535,65535,1252,1253,1254,1271,1272,1257,1258,1259,1260,1276,1276],
   0x4cfc34: [65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,1526,1527,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,65535,1470,1479,1480,1481,1482,1483,1484,1485,1486,1491,1492,1477,1478,1475,1476,1495,1496,1487,1488,1489,1490,1497,1498,1505,1506,1493,1494,1499,1500,1501,1502,1473,1474,1503,1504,1511,1515,65535,65535,1507,1508,1509,1510,1525,1513,1514,1274,1274,65535,1524,1512,34280,34280,65535,65535,65535,65535,65535,65535,1252,1516,1517,1518,1519,1520,1521,1522,1523,1276,1276],
 };
+const CHARMS = 'Art\\unit\\other\\charms.grp';
 export const FACING_TO_FRAME = [0, 1, 2, 3, 4, 3, 2, 1];
 export const PLAYER_COLOR_IDX = [0xd0, 0xd4, 0xd8, 0xdc, 0xe0, 0xe4, 0xe8, 0x0c, 0xd0, 0xd0, 0xd0, 0xd0, 0xd0, 0xd0, 0xd0, 0x0c];
 const FIRE_Y_BY_HEIGHT = [0, 0, -24, -20, -26, 0, 0, 0];
@@ -59,6 +62,12 @@ export function parseGrp(bytes) {
   return { bytes, count, w, h, frames };
 }
 
+// Uncompressed frame (Gfx_BlitBitmap: charms.grp): w*h bytes at off, index 0 transparent.
+export function decodeRawFrame(grp, i) {
+  const f = grp.frames[i], b = grp.bytes, idx = new Uint8Array(f.w * f.h), mask = new Uint8Array(f.w * f.h);
+  for (let k = 0; k < idx.length && f.off + k < b.length; k++) { idx[k] = b[f.off + k]; mask[k] = idx[k] ? 1 : 0; }
+  return { w: f.w, h: f.h, idx, mask };
+}
 // Frame -> palette indices (Uint8Array w*h) + opacity (Uint8Array w*h, 1 = drawn). Unflipped, unremapped.
 export function decodeFrameIndices(grp, i) {
   const f = grp.frames[i], b = grp.bytes;
@@ -200,7 +209,7 @@ export function createSpriteRenderer({ getFile, mem, tileset = null, palette, cr
     const k = `${name}|${fi}|${flip ? 1 : 0}|${colorBase ?? -1}`;
     let e = imgCache.get(k);
     if (e === undefined) {
-      const d = decodeFrameIndices(g, fi), { w, h } = d;
+      const d = g.raw ? decodeRawFrame(g, fi) : decodeFrameIndices(g, fi), { w, h } = d;
       e = null;
       if (w && h) {
         const remap = playerRemap(colorBase), idx = new Uint8Array(w * h), mask = new Uint8Array(w * h), used = new Uint8Array(256);
@@ -276,7 +285,30 @@ export function createSpriteRenderer({ getFile, mem, tileset = null, palette, cr
     if (r16(u + 0x1c) & 4)                      // flags2 & 4 (air): shadow.grp frame 2, 42 px below
       blit(ctx, cstr(A.shadowName) || 'Art\\unit\\other\\shadow.grp', 2, u, sx, sy, scale, cx, cy, -0x2a - bob, null);
     const fi = (FACING_TO_FRAME[r8(u + 0xa) & 7] + r8(u + 9)) & 0xff;
-    return blit(ctx, unitGfxName(r8(u + 0x2b)), fi, u, sx, sy, scale, cx, cy, bob, cb);
+    const drawn = blit(ctx, unitGfxName(r8(u + 0x2b)), fi, u, sx, sy, scale, cx, cy, bob, cb);
+    if (drawn) drawSpellIcons(ctx, u, sx, sy, scale);
+    return drawn;
+  }
+
+  // Gfx_DrawUnitSpellIcons 0x454900 / Gfx_DrawEffectIcon 0x4549d0: charms.grp frames at the unit box's top-left
+  // (+ s32 table 0x4a48e0[frame] in x): 0 bloodlust (+0x48), 1 haste / 2 slow (+0x4a s16 > 0 / < 0), 3 invisible
+  // (+0x44), 4 unholy armour (+0x46). Only when flags & 0xf == 0; no player colour.
+  const CHARM_X = [0, 16, 16, 32, 48];
+  function drawSpellIcons(ctx, u, sx, sy, scale) {
+    if (r16(u + 0x1e) & 0xf) return;
+    const haste = s16(u + 0x4a), on = [[r16(u + 0x48), 0], [haste, haste < 0 ? 2 : 1], [r16(u + 0x44), 3], [r16(u + 0x46), 4]];
+    if (!on.some(([v]) => v)) return;
+    const g = grp(CHARMS); if (!g) return;
+    g.raw = true;
+    const t = r8(u + 0x27), [cx, cy] = centre(t);
+    const x0 = s16(u) + cx - Math.trunc((r16(A.typeBox + 4 * t) << 16 >> 16) / 2) - 1;
+    const y0 = s16(u + 2) + cy - Math.trunc((r16(A.typeBox + 4 * t + 2) << 16 >> 16) / 2) - 1;
+    for (const [v, fi] of on) {
+      if (!v || fi >= g.count) continue;
+      const f = g.frames[fi], e = image(CHARMS, g, fi, false, null); if (!e) continue;
+      const dx = (r32(A.charmX + 4 * fi) | 0) || CHARM_X[fi];
+      ctx.drawImage(e.img, sx + (x0 + dx + f.x) * scale, sy + (y0 + f.y) * scale, e.w * scale, e.h * scale);
+    }
   }
 
   // Burning building: missile slot 0 (small fire, mod 6 frames) or 1 (big fire, mod 10), placed per building.
