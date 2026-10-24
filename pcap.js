@@ -151,7 +151,7 @@ export function parseCapture(bytes, { port = 34754 } = {}) {
     if (w[6] === 0x14 && w[1] === w[2] && w[2] < 8 && w[8] < 8) race[w[8]] = w[9];        // g_PlayerRace[w[8]] = w[9]
     if (ADVERT.includes(w[6]) && w.length >= 0x24) {                                     // advert / join: caps, name
       const pe = peerOf.get(p.src);
-      if (pe !== undefined) { caps.set(pe, w[0x18]); let nm = w.subarray(0x1e, 0x1f); while (nm.length && nm[nm.length - 1] === 0) nm = nm.subarray(0, nm.length - 1); names.set(pe, nm); }
+      if (pe !== undefined) { caps.set(pe, w[0x18]); let nm = w.subarray(0x1e, 0x2a); const z = nm.indexOf(0); if (z >= 0) nm = nm.subarray(0, z); names.set(pe, nm); }
     }
     if (w[6] === 0xd && w.length >= 0x40) {                                              // host's PlayerSetup record
       const pr = w.subarray(8, 0x40);

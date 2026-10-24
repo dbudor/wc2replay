@@ -33,7 +33,7 @@
     <label title="Volume. Sound starts with your first click or key press">vol <input id="volume" type="range" min="0" max="100" value="70"></label>
     <label title="Unit voices: selection / acknowledge (and, in the player view, its notices). The checkbox: in the free view, also the selection / acknowledge voices of the Fog-of-war player's clicks (of the recording machine's player with fog "all"); the player view always plays them."><input id="voices" type="checkbox"> voices <input id="voiceVol" type="range" min="0" max="100" value="100" title="Voice volume"></label>
     <label title="Sound effects: combat, buildings, spells...">fx <input id="fxVol" type="range" min="0" max="100" value="100"></label>
-    <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> mics <input id="micVol" type="range" min="0" max="200" value="100" title="Microphone volume"></label>
+    <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> mics <input id="micVol" type="range" min="0" max="400" value="100" title="Microphone volume"></label>
       <label title="Listen only to the player picked in Fog of war (keys 1-8); with fog &quot;all&quot;, to the mics picked in the players list"><input id="micLink" type="checkbox" checked> follows view</label></span>
   </span>
   <span id="pvSlot" class="pvSlot"></span>
@@ -49,7 +49,7 @@
         <button id="fogBtn" class="btn tog on" hidden aria-pressed="true" title="Show or hide this player's fog of war; the view stays on this player (F)">Fog</button>
         <button id="follow" class="btn tog" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)">Follow</button>
       </span>
-      <label title="HP bars (H)"><input id="hp" type="checkbox" checked> HP bars</label>
+      <label title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
       <label id="camBox" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
     </div>
     <div id="inspect" class="inspect" hidden></div>
