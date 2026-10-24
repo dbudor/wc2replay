@@ -110,7 +110,10 @@ const st = {
   cam: { tracks: new Map(), curBytes: [], cursors: [] },   // recorded cameras by player; Art\h_arrow.cur / o_arrow.cur
   stepClock: null,       // { from: g_TickCount before the last step, t } while playing (smooth camera time)
 };
-const setStatus = (msg, err = false) => { ui.status.textContent = msg; ui.status.title = msg; ui.status.classList.toggle('err', err); if (err) $('cover').hidden = true; };
+const setStatus = (msg, err = false) => {
+  ui.status.textContent = msg; ui.status.title = msg; ui.status.classList.toggle('err', err);
+  if (err) { $('cover').hidden = true; document.body.classList.add('menuOpen'); }   // phones: the bar (with the error) is in the menu
+};
 
 // ---------------------------------------------------------------- War2Combat plugin rules (Peon2k)
 // The sim implements Peon2k's rule changes (src/lift/mod_peon2k.c) behind W2_PATCH_PEON2K_022 / _023, + _FIX (0x400)
@@ -413,6 +416,7 @@ async function loadFromList(name) {
 }
 ui.replayList.onchange = async () => {
   const n = ui.replayList.value; if (!n) return;
+  document.body.classList.remove('menuOpen');
   ui.replayList.disabled = true;
   try { await loadFromList(n); } catch (e) { reportError(e); }
   ui.replayList.disabled = false;
@@ -806,12 +810,13 @@ function setPlayerView(on) {
     if ([...ui.fog.options].some(o => o.value === st.freeCam.fog)) { ui.fog.value = st.freeCam.fog; applyFog(); }
   }
 }
-// The inspect card floats over the map, out of the players panel. On a phone it is a sheet over the bottom of the
-// free view instead (the side panel is below the fold), and in the player view,
+// The inspect card floats over the map, out of the players panel; on an upright phone it goes into the players sheet (the side panel is below the fold), and in the player view,
 // whose 4:3 screen is short, the side panel stays below it and holds the card.
-const narrow = matchMedia('(max-width: 760px)');
+const narrow = matchMedia('(max-width: 760px) and (min-height: 501px)');               // phone upright (viewer.css "P")
+const lsPhone = matchMedia('(max-height: 500px) and (orientation: landscape)');        // phone on its side ("L")
+const phone = () => narrow.matches || lsPhone.matches;
 function placeInspect() {
-  const float = narrow.matches ? !st.pv.on : true;   // desktop: always a card over the map, left of the players panel
+  const float = !narrow.matches;   // a card over the map; upright phones: in the players sheet (a tapped unit opens it)
   if (float) ui.wrap.append(ui.inspect); else $('players').before(ui.inspect);
   ui.inspect.classList.toggle('float', float);
 }
@@ -1151,6 +1156,7 @@ function inspectAt(px, py, fp) {
   const m = st.session.mem(), R = st.renderer, keep = R.fogPlayer;
   const u = pickUnit(m, px, py, fp >= 0 ? a => { R.fogPlayer = fp; const v = m.r8(a + 0x2c) === fp || R._unitVisible(m, a); R.fogPlayer = keep; return v; } : null);
   st.inspect = unitRef(m, u);
+  if (u && narrow.matches) document.body.classList.add('sheetOpen');
   drawInspect(m);
 }
 function inspectedUnit(m) {
@@ -1211,6 +1217,11 @@ function drawPlayers(m) {
   const w = watched(), cnt = unitCounts(m);   // workers / other units / buildings, also inside buildings and transports
   const title = w >= 0 ? 'Player' : 'Players';
   if ($('sideTitle').textContent !== title) $('sideTitle').textContent = title;
+  {   // the upright phone's collapsed sheet shows this line
+    const wp = w >= 0 && readPlayers(m, units).find(p => p.id === w), k = wp && cnt[wp.id];
+    const sum = wp ? `${wp.name || `Player ${w + 1}`} · ${wp.gold} g · ${wp.lumber} l · ${wp.oil} o · ${k.p}p ${k.u}u ${k.b}b` : `${readPlayers(m, units).length} players`;
+    if ($('sideSum').textContent !== sum) $('sideSum').textContent = sum;
+  }
   for (const p of readPlayers(m, units)) {
     if (w >= 0 && p.id !== w) continue;   // a watched player: only its card (9 / fog "all": everybody)
     const k = cnt[p.id];
@@ -1268,6 +1279,8 @@ ui.score.addEventListener('click', e => {
 // jumping at the threshold; while the minimap is dragged it waits for the release.
 // M picks the side: auto (as above), always left, always right.
 const miniCard = $('miniCard');
+// the timeline's height (CSS --ctl-h): the panels and the minimap sit above it
+new ResizeObserver(() => { document.body.style.setProperty('--ctl-h', `${ui.controls.offsetHeight}px`); if (st.session) placeHud(); }).observe(ui.controls);
 let hudW = 0, hudSide = 'auto';
 try { hudSide = ['left', 'right'].includes(localStorage.getItem('w2v.side')) ? localStorage.getItem('w2v.side') : 'auto'; } catch { /* private window */ }
 function placeSides() {
@@ -1295,19 +1308,35 @@ function placeHud() {
   hudW = Math.max(miniCard.offsetWidth, stack ? Math.max(sw, cw) : sw + 8 + cw);
 }
 // ---- the players panel can be folded away (Y, or its button above the minimap); remembered per browser
+// Panel / score strip / minimap choices are remembered per mode (desktop, upright phone '.p', phone on its side '.ls');
+// on its side they start hidden.
+const prefMode = () => narrow.matches ? '.p' : lsPhone.matches ? '.ls' : '';
+function prefOn(k, dflt) { try { const v = localStorage.getItem(`w2v.${k}${prefMode()}`); return v === null ? dflt : v === '1'; } catch { return dflt; } }
+function setPref(k, on) { try { localStorage.setItem(`w2v.${k}${prefMode()}`, on ? '1' : ''); } catch { /* private window */ } }
 function setSideMin(on) {
   document.body.classList.toggle('sideMin', on); ui.sideOpen.classList.toggle('on', !on); ui.sideOpen.setAttribute('aria-pressed', String(!on));
-  try { localStorage.setItem('w2v.sideMin', on ? '1' : ''); } catch { /* private window */ }
+  setPref('sideMin', on);
   if (st.session) placeHud();
 }
 ui.sideOpen.onclick = () => setSideMin(!document.body.classList.contains('sideMin'));
-try { if (localStorage.getItem('w2v.sideMin')) setSideMin(true); } catch { /* private window */ }
+const miniBtn = $('miniBtn');
+function setMiniShown(on) {
+  document.body.classList.toggle('miniOff', !on); miniBtn.classList.toggle('on', on); miniBtn.setAttribute('aria-pressed', String(on));
+  setPref('miniOff', !on);
+  if (st.session) placeHud();
+}
+miniBtn.onclick = () => setMiniShown(document.body.classList.contains('miniOff'));
+// phones: the menu (top bar: replays, Share), the timeline's settings row, the players sheet
+$('menuBtn').onclick = () => document.body.classList.toggle('menuOpen');
+$('setBtn').onclick = () => document.body.classList.toggle('setOpen');
+document.querySelector('.sideHead').onclick = e => { if (narrow.matches && !e.target.closest('button')) document.body.classList.toggle('sheetOpen'); };
+ui.view.addEventListener('pointerdown', () => { document.body.classList.remove('menuOpen', 'setOpen'); if (narrow.matches) document.body.classList.remove('sheetOpen'); });
 // ---- score strip on / off and the timeline's mode (auto / show / hide), buttons above the minimap; remembered
 const scoreBtn = $('scoreBtn'), seekBtn = $('seekBtn');
 const SEEK_MODES = { auto: ['show', 'Timeline: auto (fades while playing)'], show: ['hide', 'Timeline: always shown, under the map'], hide: ['auto', 'Timeline: hidden'] };
 function setScoreShown(on) {
   document.body.classList.toggle('noScore', !on); scoreBtn.classList.toggle('on', on); scoreBtn.setAttribute('aria-pressed', String(on));
-  try { localStorage.setItem('w2v.noScore', on ? '' : '1'); } catch { /* private window */ }
+  setPref('noScore', !on);
 }
 function setSeekMode(mode) {
   if (!SEEK_MODES[mode]) mode = 'auto';
@@ -1318,7 +1347,14 @@ function setSeekMode(mode) {
 }
 scoreBtn.onclick = () => setScoreShown(document.body.classList.contains('noScore'));
 seekBtn.onclick = () => setSeekMode(SEEK_MODES[seekBtn.dataset.mode][0]);
-try { setScoreShown(!localStorage.getItem('w2v.noScore')); setSeekMode(localStorage.getItem('w2v.seek') || 'auto'); } catch { setSeekMode('auto'); }
+function applyPrefs() {
+  const ls = lsPhone.matches;
+  setSideMin(prefOn('sideMin', ls)); setScoreShown(!prefOn('noScore', ls)); setMiniShown(!prefOn('miniOff', ls));
+  placeInspect();
+}
+applyPrefs();
+for (const q of [narrow, lsPhone]) q.addEventListener('change', applyPrefs);
+try { setSeekMode(localStorage.getItem('w2v.seek') || 'auto'); } catch { setSeekMode('auto'); }
 // ---- keys: T timeline mode, S score strip, Y players panel, X full screen, M panels' side (auto / left / right)
 let toastTimer = 0;
 function toast(text) {

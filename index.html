@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>War2 Replay Viewer</title>
 <link rel="stylesheet" href="viewer.css">
+<!-- home-screen app (no browser bars): Android "Install app", iOS Safari "Add to Home Screen" -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#050608">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="War2 Replay">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -21,6 +30,9 @@
   <symbol id="i-score" viewBox="0 0 24 24"><g fill="currentColor"><rect x="3" y="4" width="4" height="4" rx="1"/><rect x="3" y="10" width="4" height="4" rx="1"/><rect x="3" y="16" width="4" height="4" rx="1"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></g></symbol>
   <symbol id="i-seek" viewBox="0 0 24 24"><rect x="2.5" y="13" width="19" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 16.5h8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="14" cy="16.5" r="1.8" fill="currentColor"/></symbol>
   <symbol id="i-share" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8"/></g></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></g></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></g></symbol>
   <symbol id="i-panel" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM14 5v14" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
 </svg>
 <main id="stage">
@@ -48,7 +60,7 @@
 
   <aside id="side" class="glass">
     <div class="sideHead">
-      <span id="sideTitle" class="sideTitle">Players</span>
+      <span id="sideTitle" class="sideTitle">Players</span><span id="sideSum" class="sideSum"></span>
     </div>
     <div class="row" id="viewRow">
       <span id="viewOpts" class="viewOpts">
@@ -61,10 +73,12 @@
 
   <div id="miniCard" class="glass"><canvas id="mini" width="192" height="192" title="Click or drag to move the view"></canvas>
     <div id="mapBtns" class="mapBtns">
+      <button id="menuBtn" class="iconBtn mapBtn" title="Replays, Share"><svg><use href="#i-menu"/></svg></button>
       <button id="fogBtn" class="iconBtn mapBtn on" hidden aria-pressed="true" title="Show or hide this player's fog of war; the view stays on this player (F)"><svg><use href="#i-fog"/></svg></button>
       <button id="follow" class="iconBtn mapBtn" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)"><svg><use href="#i-follow"/></svg></button>
       <button id="scoreBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the score strip (S)"><svg><use href="#i-score"/></svg></button>
       <button id="seekBtn" class="iconBtn mapBtn" data-mode="auto" title="Timeline: auto (fades while playing) (T)"><svg><use href="#i-seek"/></svg></button>
+      <button id="miniBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the minimap"><svg><use href="#i-map"/></svg></button>
       <button id="sideOpen" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the players panel (Y)"><svg><use href="#i-panel"/></svg></button>
       <label class="iconBtn mapBtn pvBtn" title="Player view: the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"><svg><use href="#i-pview"/></svg></label>
     </div></div>
@@ -96,6 +110,7 @@
         <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> <span class="lbl">mics</span> <input id="micVol" type="range" min="0" max="400" value="100" title="Microphone volume"></label>
           <label title="Listen only to the player picked in Fog of war (keys 1-8); with fog &quot;all&quot;, to the mics picked in the players list"><input id="micLink" type="checkbox" checked> <span class="lbl">follows view</span></label></span>
       </span>
+      <button id="setBtn" class="iconBtn" title="Sound and view settings"><svg><use href="#i-gear"/></svg></button>
       <button id="fullBtn" class="iconBtn" hidden title="Full screen (X)"><svg><use href="#i-full"/></svg></button>
     </div>
   </div>
