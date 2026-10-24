@@ -511,14 +511,14 @@ async function applyUrlState() {
   const q = urlState; if (!q) return;
   if (q.get('replay') && q.get('replay') !== picked.listName) return;
   urlState = null;
-  const cover = $('cover'), coverText = $('coverText');
+  const cover = $('cover'), coverText = $('coverText'), share = q.get('pause') !== null;
   const num = k => q.get(k) !== null && q.get(k) !== '' && Number.isFinite(+q.get(k)) ? +q.get(k) : null;
   if (q.get('fog') && [...ui.fog.options].some(o => o.value === q.get('fog'))) { ui.fog.value = q.get('fog'); ui.fog.onchange(); }
   if (q.get('pview')) setPlayerView(true);
   if (num('turn') !== null) {
     const to = Math.max(0, Math.min(st.totalTurns - 1, num('turn')));
-    if (to > 0) { cover.hidden = false; coverText.textContent = `Going to ${fmtTime(to * 2 * st.tickMs)}…`; }
-    await seekTo(to, f => { coverText.textContent = `Going to ${fmtTime(to * 2 * st.tickMs)}… ${Math.round(100 * f)}%`; });
+    if (to > 0) { cover.hidden = false; coverText.textContent = 'Loading…'; }
+    await seekTo(to, f => { coverText.textContent = `Loading… ${Math.round(100 * f)}%`; });
   }
   if (q.get('nofog') === '1' && watched() >= 0) { st.noFog = true; applyFog(); }
   if (num('zoom')) st.view.scale = Math.max(0.25, Math.min(8, num('zoom'))) * (window.devicePixelRatio || 1);
@@ -526,14 +526,20 @@ async function applyUrlState() {
   if (q.get('follow') === '1' && watched() >= 0) { if (st.pv.on) pvFollow(); else { st.free.follow = true; updateWatchButtons(); } }
   if (q.get('micfollow') === '0') { ui.micLink.checked = false; ui.micLink.onchange(); }
   if (q.get('mics') !== null) { mic.picked = new Set(q.get('mics').split(',').filter(Boolean).map(Number).filter(p => p >= 0 && p < 8)); drawPlayers(st.session.mem()); }
+  // A shared link (it has pause=) shows nothing but the big Play button until it is pressed (the press also lets the
+  // browser start sound); then it plays from its moment and pauses once after `pause` s of game time (0: plays on).
+  if (share) {
+    const sec = Math.max(0, num('pause') || 0);
+    coverGo = () => { coverGo = null; cover.hidden = true; if (lobbyUp()) startFromLobby(); else setPlaying(true); if (sec > 0) st.pauseAtTick = st.session.tick + Math.round(sec * 1000 / st.tickMs); };
+    coverText.textContent = '';
+    if (coverClicked) coverGo();
+    return;
+  }
   cover.hidden = true;
-  // a shared link plays from its moment and pauses once after `pause` seconds of game time (0: plays on; -1: stays paused)
-  const sec = num('pause');
-  if (sec !== null && sec >= 0) {
-    setPlaying(true);
-    if (sec > 0) st.pauseAtTick = st.session.tick + Math.round(sec * 1000 / st.tickMs);
-  } else if (sec === null && q.get('play')) setPlaying(true);
+  if (q.get('play')) setPlaying(true);
 }
+let coverGo = null, coverClicked = false;   // the shared link's Play: pressed / what it starts once the jump is done
+$('coverPlay').onclick = () => { coverClicked = true; audio.unlock(); if (coverGo) coverGo(); else $('coverPlay').classList.add('armed'); };
 function autoPause() {   // from the playback loop
   if (st.pauseAtTick == null || st.session.tick < st.pauseAtTick) return;
   setPlaying(false); toast('Paused — press Play to go on');
@@ -550,7 +556,7 @@ function shareUrl() {
   if (st.pv.on) q.set('pview', '1');
   if (mic.picked.size) q.set('mics', [...mic.picked].sort((a, b) => a - b).join(','));
   if (!ui.micLink.checked) q.set('micfollow', '0');
-  q.set('pause', String(Math.max(-1, Math.round(+ui.pauseAfter.value || 0))));
+  q.set('pause', String(Math.max(0, Math.round(+ui.pauseAfter.value || 0))));
   const rules = picked.converted ? picked.converted.rules : st.session.rules;
   if (rules != null) q.set('rules', String(rules));
   return `${location.origin}${location.pathname}?${q}`;
@@ -562,7 +568,7 @@ async function copyText(t) {
   return ok;
 }
 try { const v = localStorage.getItem('w2v.pauseAfter'); if (v !== null && v !== '') ui.pauseAfter.value = v; } catch { /* private window */ }
-ui.pauseAfter.onchange = () => { try { localStorage.setItem('w2v.pauseAfter', String(Math.max(-1, Math.round(+ui.pauseAfter.value || 0)))); } catch { /* private window */ } };
+ui.pauseAfter.onchange = () => { try { localStorage.setItem('w2v.pauseAfter', String(Math.max(0, Math.round(+ui.pauseAfter.value || 0)))); } catch { /* private window */ } };
 $('share').onclick = async () => {
   if (!st.session || !picked.listName) return;
   const u = shareUrl();
@@ -572,7 +578,9 @@ $('share').onclick = async () => {
 if (urlState.get('rules') && [...ui.rules.options].some(o => o.value === urlState.get('rules'))) ui.rules.value = urlState.get('rules');
 // a shared link: load its replay from the list once the game files and the list are there
 if (urlState.get('replay')) (async () => {
-  if (urlState.get('turn') && urlState.get('turn') !== '0') $('cover').hidden = false;   // no lobby flash before the jump
+  if (urlState.get('pause') !== null || urlState.get('turn') && urlState.get('turn') !== '0') {   // nothing shows before the jump / Play
+    $('cover').hidden = false; $('coverPlay').hidden = urlState.get('pause') === null; $('coverPlay').focus(); $('coverText').textContent = 'Loading…';
+  }
   await autoGame; await refreshReplayList();
   if (!picked.exe || !picked.dat) { $('cover').hidden = true; setStatus(`This link opens replays/${urlState.get('replay')}: pick the game files first (Warcraft II BNE.exe, War2Dat.mpq).`); return; }
   ui.replayList.value = urlState.get('replay');
@@ -851,6 +859,10 @@ ui.micLink.onchange = () => { audio.settings.micLink = ui.micLink.checked; audio
 function micFocus() { mic.focus = ui.micLink.checked && st.session && watched() >= 0 ? watched() : -1; }
 ui.camShow.onchange = () => { st.pv.camRec = true; };
 window.addEventListener('keydown', e => {
+  if (!$('cover').hidden) {   // a shared link's cover: only Play (space / enter)
+    if ((e.key === ' ' || e.key === 'Enter') && !$('coverPlay').hidden) { e.preventDefault(); $('coverPlay').click(); }
+    return;
+  }
   if (!st.session || e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
   if (e.key === ' ') { e.preventDefault(); playPressed(); }
   else if (!e.ctrlKey && !e.metaKey && !e.altKey && HUD_KEYS[e.key.toLowerCase()]) HUD_KEYS[e.key.toLowerCase()]();

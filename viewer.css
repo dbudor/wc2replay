@@ -46,9 +46,14 @@ body.idle #view { cursor: none; }
 .shareBox { display: inline-flex; align-items: center; gap: 8px; }
 #pauseAfter { width: 52px; background: rgba(255, 255, 255, .06); border: 1px solid var(--edge); border-radius: 8px; padding: 3px 6px; color: var(--text); }
 /* a shared link's jump runs behind this (no lobby, no fast-forward on screen) */
-.cover { position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; background: radial-gradient(ellipse at center, #141821 0%, #050608 70%); }
-.coverBox { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--edge);
-  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cover { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; background: #050608; }
+.coverPlay { display: grid; place-items: center; width: min(34vmin, 260px); height: min(34vmin, 260px); border: 0; border-radius: 50%; cursor: pointer;
+  background: var(--accent); color: #1a1408; box-shadow: 0 0 0 14px rgba(240, 180, 60, .16), 0 20px 60px #000; transition: transform .15s, background .15s; }
+.coverPlay:hover { background: var(--accent-2); transform: scale(1.04); }
+.coverPlay svg { width: 46%; height: 46%; margin-left: 7%; }
+.coverPlay.armed { animation: coverPulse 1s ease-in-out infinite alternate; }   /* clicked while the jump still runs */
+@keyframes coverPulse { to { box-shadow: 0 0 0 26px rgba(240, 180, 60, .08), 0 20px 60px #000; } }
+.coverText { min-height: 1.4em; color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 .btn.tog { padding: 3px 10px; font-size: 12px; }
 .btn.tog:not(.on) { opacity: .55; }
 .btn.tog.on { border-color: var(--blue); background: rgba(106, 162, 255, .16); }
