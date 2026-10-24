@@ -25,7 +25,7 @@
 </svg>
 <main id="stage">
   <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div><div id="talkers" class="talkers" hidden></div><div id="toast" class="toast" hidden></div></div>
-  <div id="cover" class="cover" hidden><div class="coverBox"><span class="logo">W2</span><span id="coverText">Opening the shared replay…</span></div></div>
+  <div id="cover" class="cover" hidden><button id="coverPlay" class="coverPlay" title="Play"><svg><use href="#i-play"/></svg></button><div id="coverText" class="coverText"></div></div>
 
   <header id="bar" class="glass">
     <strong class="brand"><span class="logo">W2</span>War2 <em>Replay</em></strong>
@@ -38,7 +38,7 @@
     <label id="peerBox" class="field" hidden title="The player whose view the replay takes (a capture holds every player's packets)"><span>View of</span><select id="peer"></select></label>
     <span id="shareBox" class="shareBox" hidden>
       <button id="share" class="btn shareBtn" title="Copy a link to this replay at this moment: time, view, zoom, watched player, fog, follow, player view and microphones. The link plays from there"><svg><use href="#i-share"/></svg>Share</button>
-      <label class="field" title="The shared link plays from its moment and pauses after this many seconds of game time (0: does not pause; -1: stays paused at the moment)">pause after <input id="pauseAfter" type="number" min="-1" max="3600" step="1" value="10"> s</label>
+      <label class="field" title="The shared link plays from its moment and pauses after this many seconds of game time (0: does not pause)">pause after <input id="pauseAfter" type="number" min="0" max="3600" step="1" value="10"> s</label>
     </span>
     <button id="save" class="btn" hidden title="Download the replay converted from the capture (a small .w2r file to share)">Save .w2r</button>
     <span id="status" class="status">Pick <code>Warcraft II BNE.exe</code>, <code>War2Dat.mpq</code> (+ <code>War2Patch.mpq</code>), a <code>.w2r</code> (or <code>.w2r.gz</code>) replay or a <code>.pcapng</code>/<code>.pcap</code> capture of an IPX game and, for custom maps, its <code>.pud</code>. Files stay in this browser.</span>
