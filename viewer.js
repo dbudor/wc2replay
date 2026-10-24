@@ -198,7 +198,7 @@ async function addFiles(list) {
     if (n.endsWith('.exe')) picked.exe = await buf();
     else if (n === 'war2dat.mpq') picked.dat = await buf();
     else if (n === 'war2patch.mpq') picked.patch = await buf();
-    else if (n.endsWith('.w2r')) { picked.replay = await buf(); picked.replayName = f.name; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
+    else if (/\.w2r(\.gz)?$/.test(n)) { picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
     else if (n.endsWith('.pud')) picked.puds.set(n, await buf());
     else if (n.endsWith('.w2p')) { setPlugin(pluginInfo(await buf(), f.name)); onlyPlugin = true; continue; }
     else if (/\.(pcapng|pcap|cap)$/.test(n)) {
@@ -343,7 +343,7 @@ if (loadList) (async () => {
 // tools/dist/serve.py (its --replays DIR, default the viewer's replays/ folder) or as a static file by make_dist.sh.
 // Picking an entry fetches it like a picked file; a capture or .w2r on a custom map brings its .pud along when the
 // folder has one of that name. Re-read when the page gets the focus back (new captures show up).
-const REPLAY_EXT = /\.(w2r|pcapng|pcap|cap|w2c|pud)$/i;
+const REPLAY_EXT = /\.(w2r|w2r\.gz|pcapng|pcap|cap|w2c|pud)$/i;
 let replayIndex = [];
 async function refreshReplayList() {
   if (!/^https?:$/.test(location.protocol)) return;
@@ -361,6 +361,11 @@ async function refreshReplayList() {
   for (const e of replayIndex) sel.add(new Option(`${e.name}${when(e.mtime)}${e.size ? ' · ' + kb(e.size) : ''}`, e.name));
   sel.value = replayIndex.some(e => e.name === keep) ? keep : '';
   ui.listBox.hidden = false;
+}
+// A gzipped file (.w2r.gz; magic 1f 8b) inflated, anything else as it is (a host may have inflated it already)
+async function gunzipIf(b) {
+  if (b.length < 2 || b[0] !== 0x1f || b[1] !== 0x8b) return b;
+  return new Uint8Array(await new Response(new Blob([b]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
 }
 // .pud name a .w2r's PUD chunk names (custom map), or ''
 function w2rPudName(b) {
@@ -398,9 +403,9 @@ async function loadFromList(name) {
   const get = async n => { const r = await fetch(url(n), { cache: 'no-store' }); if (!r.ok) throw new Error(`cannot fetch replays/${n} (${r.status})`); return new Uint8Array(await r.arrayBuffer()); };
   const file = (n, b) => ({ name: n.split('/').pop(), arrayBuffer: async () => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
   setStatus(`Loading replays/${name}…`);
-  const b = await get(name), fl = [file(name, b)];
+  const b = await gunzipIf(await get(name)), fl = [file(name, b)];
   let map = '';
-  if (/\.w2r$/i.test(name)) map = w2rPudName(b);
+  if (/\.w2r(\.gz)?$/i.test(name)) map = w2rPudName(b);
   else if (/\.(pcapng|pcap|cap)$/i.test(name)) { try { const c = parseCapture(b); if (c.customMap) map = /\.pud$/i.test(c.mapName) ? c.mapName : c.mapName + '.pud'; } catch { /* addFiles reports it */ } }
   const base = s => s.replace(/^.*[\\/]/, '').toLowerCase();
   const pud = map && !picked.puds.has(base(map)) && replayIndex.find(e => /\.pud$/i.test(e.name) && base(e.name) === base(map));
