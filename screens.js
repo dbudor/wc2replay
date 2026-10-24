@@ -348,7 +348,7 @@ export function renderLobby(art, L) {
     put(c, /^Ready/.test(c.text) ? 'Recorded game: press Play (or Start replay) to start' : c.text);
   }
   for (const sl of L.slots) {
-    const nameC = by(20 + sl.k), infoC = by(12 + sl.k), colC = by(43 + sl.k), hostC = by(28 + sl.k);
+    const nameC = by(20 + sl.k), infoC = by(12 + sl.k), colC = by(43 + sl.k);
     const occupied = sl.kind === 'human' || (sl.kind === 'computer' && sl.inGame);
     if (nameC) put(nameC, sl.name, { pad: 4, set: 4 });   // as the game: names and "Available" in the label white, on the parchment
     if (infoC) {
@@ -356,12 +356,12 @@ export function renderLobby(art, L) {
       if (occupied) {
         const actual = sl.race === 1 ? 'Orc' : 'Human';
         t = sl.lobbyRace === actual ? actual : `${sl.lobbyRace} (${actual})`;
-        t += sl.kind === 'human' ? `  -  player ${sl.p + 1}${sl.host ? ', host' : ''}${sl.recorder ? ', recorder' : ''}` : `  -  player ${sl.p + 1}, computer`;
+        const rec = [sl.mic && 'mic', sl.cam && 'camera'].filter(Boolean).join(', ');   // CamRec recordings (set by the viewer)
+        t += sl.kind === 'human' ? (rec ? `  -  ${rec}` : '') : '  -  computer';
       }
       put(infoC, t, { pad: 4 });
     }
     if (colC && occupied) { s.fill(colC.l, colC.t + 1, colC.r - colC.l + 1, colC.b - colC.t - 1, sl.color); s.bevel(colC.l, colC.t + 1, colC.r - colC.l + 1, colC.b - colC.t - 1); }
-    if (hostC && sl.host) put(hostC, 'H', { align: 'c', set: 2 });
   }
   const val = (id, t) => { const c = by(id); if (!c) return; put(c, t, { pad: 4, set: 2 }); };
   val(10, L.yourRace);
@@ -371,7 +371,7 @@ export function renderLobby(art, L) {
   const sc = by(11);
   if (sc) {
     const f = ctrlFont(F, sc);
-    [`${L.scenarioKind}: ${L.mapTitle}`, `Map ${L.mapSize}x${L.mapSize}, ${L.mode}, speed ${L.speed}`]
+    [`${L.scenarioKind}: ${L.mapTitle}`, `Map ${L.mapSize}x${L.mapSize}, ${L.mode}, speed ${L.speed}`, L.rules && `Rules: ${L.rules}`].filter(Boolean)
       .forEach((t, i) => put(sc, t, { y: sc.t + 2 + i * (f.maxH + 4), set: 4 }));
   }
   const lv = by(1);

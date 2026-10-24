@@ -1,115 +1,283 @@
+/* Broadcast-style layout: the map fills the window and everything else floats over it on glass panels
+   (score strip on the left, players panel on the right, minimap bottom-left, timeline at the bottom). The panels never
+   move. The top bar shows only on the start screen, while paused and at the end (hidden in body.playing); the timeline
+   fades out while a replay plays and the mouse rests (body.idle). Phones stack the panels instead. */
 :root {
-  --bg: #15161a; --panel: #1e2026; --line: #2f323a; --text: #e6e3da; --muted: #9a978f; --accent: #d8b35a; --bad: #e06050;
+  --bg: #07080b; --glass: rgba(13, 15, 21, .78); --glass-hi: rgba(26, 29, 38, .9); --edge: rgba(255, 255, 255, .09);
+  --line: rgba(255, 255, 255, .08); --text: #eceae4; --muted: #8f939e; --accent: #f0b43c; --accent-2: #ffd27a; --bad: #ff6b5a;
+  --good: #5fd38a; --blue: #6aa2ff; --r: 12px;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
-code { font-size: 12px; color: var(--accent); }
-#bar, .controls { display: flex; gap: 10px; align-items: center; padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-.brand { color: var(--accent); letter-spacing: .02em; }
-.status { color: var(--muted); flex: 1; min-width: 200px; }
-.status.err { color: var(--bad); }
-.btn { background: #2b2e36; color: var(--text); border: 1px solid #3a3e48; border-radius: 4px; padding: 4px 10px; cursor: pointer; font: inherit; }
-.btn:hover { background: #343844; }
-.btn.file input { display: none; }
-select { background: #2b2e36; color: var(--text); border: 1px solid #3a3e48; border-radius: 4px; padding: 3px; font: inherit; }
-#seek { flex: 1; min-width: 120px; accent-color: var(--accent); }
-.clock { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 220px; }
-.audio { display: flex; gap: 8px; align-items: center; }
-#volume, #voiceVol, #fxVol { width: 70px; accent-color: var(--accent); vertical-align: middle; }
-.audio label { white-space: nowrap; }
-main { flex: 1; display: flex; min-height: 0; }
-#viewWrap { flex: 1; position: relative; min-width: 0; background: #000; }
+body { background: var(--bg); color: var(--text); font: 13px/1.4 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased; overflow: hidden; }
+code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent-2); }
+button, select, input { font: inherit; color: inherit; }
+.drop[hidden], [hidden] { display: none !important; }
+
+#stage { position: relative; height: 100%; overflow: hidden; }
+#viewWrap { position: absolute; inset: 0; background: radial-gradient(ellipse at center, #141821 0%, #050608 70%); }
 #view { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; image-rendering: pixelated; touch-action: none; }
 #view.drag { cursor: grabbing; }
-.drop { position: absolute; inset: 12px; border: 2px dashed var(--accent); display: grid; place-items: center; color: var(--accent); font-size: 18px; background: #000a; }
-#side { width: 300px; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; padding: 10px; gap: 8px; min-height: 0; overflow-y: auto; }
-#mini { width: 100%; flex: none; aspect-ratio: 1; image-rendering: pixelated; background: #000; cursor: crosshair; border: 1px solid var(--line); }
-.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.player { display: grid; grid-template-columns: 12px 1fr auto; gap: 2px 8px; padding: 6px 0; border-top: 1px solid var(--line); align-items: center; }
-.player .sw { width: 12px; height: 12px; border-radius: 2px; border: 1px solid #0008; }
-.player .nm { font-weight: 600; }
-.player .meta { color: var(--muted); font-size: 12px; }
-.player .res { grid-column: 2 / 4; display: flex; gap: 10px; font-variant-numeric: tabular-nums; font-size: 12px; flex-wrap: wrap; }
-.player .res.stats { color: var(--muted); }
-.player.out { opacity: .5; }
-.logHead { border-top: 1px solid var(--line); padding-top: 6px; }
-.log { flex: 1 0 160px; overflow-y: auto; font-size: 12px; font-variant-numeric: tabular-nums; }
-.log div { padding: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.log .t { color: var(--muted); margin-right: 6px; }
-.log .k-msg { color: var(--text); }
-.log .k-snd { color: #8fa6c8; }
-.log .k-voice { color: #a8c88f; }
-.log .k-alert { color: var(--bad); }
-.log .k-mic { color: #e0b0e8; }
-.viewOpts, .pvSlot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-body.pview #side { display: none; }
-body.pview #view { cursor: default; }
-body.pview #view.drag { cursor: grabbing; }
-.drop[hidden], [hidden] { display: none !important; }
-/* click-to-inspect card (unitinfo.js) */
-.inspect { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
-.inspHead { display: flex; justify-content: space-between; align-items: center; font-weight: bold; font-size: 13px; }
-.inspX { background: none; border: 0; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.drop { position: absolute; inset: 16px; border: 2px dashed var(--accent); border-radius: 20px; display: grid; place-items: center;
+  color: var(--accent); font-size: 20px; font-weight: 600; background: #000b; z-index: 5; }
+
+/* ---- glass panels */
+.glass { position: absolute; z-index: 3; background: var(--glass); border: 1px solid var(--edge); border-radius: var(--r);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .45); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); }
+#bar { z-index: 4; }
+#bar, #controls { transition: opacity .35s ease, transform .35s ease; }
+body { --hud-b: calc(var(--ctl-h, 80px) + 22px); }   /* bottom of the floating panels: above the timeline */
+body.seek-show { --hud-b: calc(var(--ctl-h, 80px) + 12px); }
+body.seek-hide { --hud-b: 12px; }
+body.idle:not(.seek-show) #controls { opacity: 0; transform: translateY(8px); pointer-events: none; }
+body.idle #view { cursor: none; }
+
+/* ---- controls */
+.btn { background: rgba(255, 255, 255, .06); border: 1px solid var(--edge); border-radius: 8px; padding: 5px 12px; cursor: pointer;
+  white-space: nowrap; transition: background .15s, border-color .15s; }
+.btn:hover { background: rgba(255, 255, 255, .12); }
+.btn.file { background: var(--accent); color: #1a1408; border-color: transparent; font-weight: 600; }
+.btn.file:hover { background: var(--accent-2); }
+.btn.file input { display: none; }
+.shareBtn { display: inline-flex; align-items: center; gap: 6px; }
+.shareBtn svg { width: 15px; height: 15px; }
+.shareBox { display: inline-flex; align-items: center; gap: 8px; }
+#pauseAfter { width: 52px; background: rgba(255, 255, 255, .06); border: 1px solid var(--edge); border-radius: 8px; padding: 3px 6px; color: var(--text); }
+/* a shared link's jump runs behind this (no lobby, no fast-forward on screen) */
+.cover { position: absolute; inset: 0; z-index: 8; display: grid; place-items: center; background: radial-gradient(ellipse at center, #141821 0%, #050608 70%); }
+.coverBox { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-radius: var(--r); background: var(--glass); border: 1px solid var(--edge);
+  font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.btn.tog { padding: 3px 10px; font-size: 12px; }
+.btn.tog:not(.on) { opacity: .55; }
+.btn.tog.on { border-color: var(--blue); background: rgba(106, 162, 255, .16); }
+select { background: rgba(255, 255, 255, .06); border: 1px solid var(--edge); border-radius: 8px; padding: 4px 6px; cursor: pointer; }
+select option { background: #1b1e26; }
+.field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.field select { color: var(--text); font-size: 13px; }
+.chk { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; }
+input[type=checkbox] { accent-color: var(--accent); margin: 0; }
+input[type=range] { accent-color: var(--accent); }
+.iconBtn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: transparent;
+  color: var(--text); cursor: pointer; transition: background .15s, transform .1s; }
+.iconBtn:hover { background: rgba(255, 255, 255, .1); }
+.iconBtn:active { transform: scale(.94); }
+.iconBtn svg { width: 18px; height: 18px; }
+.iconBtn.big { width: 42px; height: 42px; background: var(--accent); color: #1a1408; }
+.iconBtn.big:hover { background: var(--accent-2); }
+.iconBtn.big svg { width: 20px; height: 20px; }
+
+/* ---- top bar */
+#bar { top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 24px); display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+.brand em { font-style: normal; color: var(--accent); }
+.logo { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; font-size: 11px; font-weight: 800;
+  color: #1a1408; background: linear-gradient(135deg, var(--accent-2), var(--accent) 60%, #b97b17); }
+.status { color: var(--muted); font-size: 12px; flex: 1 1 260px; min-width: 0; max-width: 520px; }
+.status.err { color: var(--bad); }
+/* once a replay runs the bar stays one line (the full status is its tooltip) */
+body:not(:has(#controls[hidden])) #bar .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+body:not(:has(#controls[hidden])) #bar .status:not(.err) { display: none; }   /* the lobby tells the rest; errors still show */
+#rulesBox { display: none !important; }   /* rules: auto-detected, or the link's rules= */
+body:not(:has(#controls[hidden])) #bar { max-width: calc(100% - 2 * 340px); flex-wrap: nowrap; }
+body.playing #bar { opacity: 0; transform: translate(-50%, -10px); pointer-events: none; }
+
+/* the start screen: the bar is a centred card, the rest waits for a replay */
+body:has(#controls[hidden]) #bar { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px)); flex-direction: column;
+  align-items: stretch; gap: 12px; padding: 24px 26px; text-align: left; }
+body:has(#controls[hidden]) .brand { font-size: 22px; gap: 12px; }
+body:has(#controls[hidden]) .logo { width: 38px; height: 38px; font-size: 15px; border-radius: 10px; }
+body:has(#controls[hidden]) .status { order: 1; font-size: 13px; line-height: 1.55; max-width: none; flex: none; }
+body:has(#controls[hidden]) .btn.file { align-self: flex-start; padding: 9px 18px; font-size: 14px; }
+body:has(#controls[hidden]) .field { justify-content: space-between; font-size: 13px; }
+body:has(#controls[hidden]) .field select { flex: 1; max-width: 340px; }
+body:has(#controls[hidden]) :is(#side, #miniCard, #score) { display: none !important; }
+
+/* ---- score strip (left): team 1 above team 2, a card per player */
+.score { position: absolute; z-index: 3; top: 12px; left: 12px; width: 172px; display: flex; flex-direction: column; gap: 8px;
+  max-height: calc(100% - var(--hud-b) - 284px); overflow-y: auto; scrollbar-width: none; }
+.team { display: flex; flex-direction: column; gap: 3px; padding: 6px; background: var(--glass); border: 1px solid var(--edge); border-radius: var(--r);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, .45); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.tl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); padding: 0 4px 2px; }
+.pc { position: relative; display: flex; flex-direction: column; justify-content: center; min-width: 0; padding: 3px 9px 3px 11px;
+  border-radius: 8px; background: rgba(255, 255, 255, .04); cursor: pointer; transition: background .15s; overflow: hidden; }
+.pc:hover { background: rgba(255, 255, 255, .1); }
+.pc::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
+.pc.sel { background: color-mix(in srgb, var(--c) 26%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 70%, transparent); }
+.pc .n { font-weight: 700; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pc .s { font-size: 12px; word-spacing: 3px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pc .s b { color: var(--text); font-weight: 700; word-spacing: 0; margin-right: 1px; }
+.pc.out { opacity: .45; }
+.pc.out .n { text-decoration: line-through; }
+.pc.talk { box-shadow: inset 0 0 0 2px var(--good); }
+.pc.talk .n::after { content: " ●"; color: var(--good); font-size: 9px; vertical-align: 2px; }
+
+/* ---- players panel (right) */
+#side { top: 12px; right: 12px; bottom: 12px; width: 316px; display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: #ffffff22 transparent; }
+body:has(#controls:not([hidden])) #side { bottom: auto; max-height: calc(100% - var(--hud-b) - 12px); }   /* as tall as its content */
+body.sideMin #side { display: none; }
+#viewRow { display: none !important; }   /* the fog selector: the score strip and keys 1-9 pick the player (it shows in the player view's bar) */
+.sideHead { display: flex; align-items: center; justify-content: space-between; margin: -2px -4px -4px 0; }
+.sideTitle { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.row { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+.viewOpts, .pvSlot { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+.player { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 8px 10px 8px 14px; border-radius: 10px;
+  background: rgba(255, 255, 255, .04); align-items: center; margin-bottom: 6px; overflow: hidden; }
+.player .sw { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+.player .nm { font-weight: 700; font-size: 13px; }
+.player .meta { color: var(--muted); font-size: 11px; text-align: right; }
+.player .res { grid-column: 1 / 3; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px 10px; font-variant-numeric: tabular-nums; font-size: 12px; }
+.player .res > span { white-space: nowrap; }
+.player .res b { font-weight: 700; color: var(--text); font-size: 13px; }
+.player .res.stats b { font-size: 12px; }
+.player .res.stats { color: var(--muted); font-size: 11px; padding-top: 3px; border-top: 1px solid var(--line); margin-top: 3px; }
+.player .res i { font-style: normal; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 0; }
+.player.out { opacity: .45; }
+
+/* ---- minimap (bottom-left) */
+#miniCard { left: 12px; bottom: var(--hud-b); padding: 6px; }
+/* fog (F), follow (L) and player view (P) buttons in a row above the minimap; in the player view (own minimap) alone */
+.mapBtns { position: absolute; left: 0; bottom: calc(100% + 8px); display: flex; gap: 6px; }
+.mapBtn { width: 36px; height: 36px; border-radius: 10px; background: var(--glass); border: 1px solid var(--edge); color: var(--muted);
+  box-shadow: 0 4px 14px #0007; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.mapBtn svg { width: 19px; height: 19px; }
+.mapBtn:hover { color: var(--text); background: var(--glass-hi); }
+.mapBtn.on, .mapBtn:has(input:checked) { background: var(--accent); color: #1a1408; border-color: transparent; }
+.mapBtn.on:hover, .mapBtn:has(input:checked):hover { background: var(--accent-2); }
+.mapBtn:has(input:disabled) { opacity: .35; cursor: not-allowed; }
+.mapBtn input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+#fogBtn:not(.on)::after { content: ""; position: absolute; width: 22px; height: 2px; background: currentColor; transform: rotate(-45deg); }
+body.pview #miniCard { display: block !important; background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0; }
+body.pview #mini { display: none; }
+body.pview .mapBtns { bottom: 0; }
+#mini { display: block; width: 200px; height: 200px; image-rendering: pixelated; background: #000; cursor: crosshair; border-radius: 6px; }
+body.pview :is(#side, #sideOpen, #scoreBtn, #score) { display: none !important; }
+@media (min-width: 761px) { body.screenUp :is(#side, #score, #miniCard) { display: none !important; } }
+
+/* ---- timeline (bottom); seekBtn modes: auto (floats, fades while playing), show (docked: the map ends above it), hide */
+body.seek-show #controls { left: 0; right: 0; bottom: 0; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
+body.seek-show #viewWrap { bottom: var(--ctl-h, 80px); }
+body.seek-hide #controls { display: none !important; }
+body.noScore .score { display: none !important; }
+#seekBtn[data-mode=auto]::after { content: "A"; position: absolute; top: 3px; right: 4px; font-size: 9px; font-weight: 800; line-height: 1; }
+#seekBtn[data-mode=show] { background: var(--accent); color: #1a1408; border-color: transparent; }
+#seekBtn[data-mode=hide]::after { content: ""; position: absolute; width: 22px; height: 2px; background: currentColor; transform: rotate(-45deg); }
+#controls { left: 12px; right: 12px; bottom: 12px; padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.timeline { position: relative; height: 18px; display: flex; align-items: center; }
+#seek { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; margin: 0; background: transparent; cursor: pointer; --p: 0%; }
+#seek::-webkit-slider-runnable-track { height: 5px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) var(--p), rgba(255, 255, 255, .16) var(--p)); }
+#seek::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .16); }
+#seek::-moz-range-progress { height: 5px; border-radius: 3px; background: var(--accent); }
+#seek::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -4.5px; border-radius: 50%; background: #fff;
+  box-shadow: 0 0 0 4px rgba(240, 180, 60, .35); transition: transform .1s; }
+#seek::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgba(240, 180, 60, .35); }
+#seek:hover::-webkit-slider-runnable-track { height: 7px; }
+#seek:hover::-webkit-slider-thumb { transform: scale(1.15); margin-top: -3.5px; }
+.ctlRow { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
+.transport { display: flex; align-items: center; gap: 4px; }
+.speed { margin-left: 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.clock { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.clock b { color: var(--text); font-size: 17px; font-weight: 700; margin-right: 8px; letter-spacing: .01em; }
+.audio { display: flex; gap: 6px 14px; align-items: center; margin-left: auto; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+.audio label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+#micsBox { display: inline-flex; gap: 14px; }
+#volume, #voiceVol, #fxVol, #micVol { width: 70px; vertical-align: middle; }
+
+/* ---- short notice for key toggles (T, S, M ...) */
+.toast { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; padding: 8px 16px;
+  border-radius: 999px; background: rgba(10, 12, 16, .85); border: 1px solid var(--edge); font-weight: 600; box-shadow: 0 4px 14px #0007; }
+
+/* ---- who is talking (over the map, under the score strip) */
+.talkers { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px;
+  max-width: 60%; z-index: 2; pointer-events: none; }
+body.playing .talkers, body.pview .talkers { top: 12px; }
+.talkers span { background: rgba(10, 12, 16, .82); color: #fff; border-radius: 999px; padding: 3px 12px 3px 7px; font-size: 13px; font-weight: 600;
+  border: 1px solid var(--edge); box-shadow: 0 4px 14px #0007; }
+.talkers span.quiet { opacity: .55; }
+.talkers i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: -1px; box-shadow: 0 0 0 3px rgba(95, 211, 138, .45); }
+.micBtn { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-left: 6px; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--edge); background: rgba(255, 255, 255, .06); color: var(--muted); cursor: pointer; vertical-align: 1px; }
+.micBtn.talk { background: #2f7a48; color: #fff; border-color: var(--good); }
+.micBtn.on { color: #fff; border-color: var(--blue); background: #2a4677; }
+.micBtn.talk:not(.on) { background: rgba(95, 211, 138, .12); color: #9fdcb2; border-style: dashed; }
+
+/* ---- click-to-inspect card (unitinfo.js) */
+.inspect { border-radius: 10px; padding: 8px 10px; font-size: 12px; font-variant-numeric: tabular-nums; background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--edge); }
+.inspHead { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; }
+.inspX { background: none; border: 0; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .inspX:hover { color: var(--text); }
-.inspOwner { color: var(--muted); margin: 2px 0 4px; }
-.inspOwner i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-.inspBar { position: relative; height: 15px; background: #1b1d22; border: 1px solid #3a3e48; border-radius: 3px; margin: 3px 0; overflow: hidden; }
-.inspBar b { position: absolute; left: 0; top: 0; bottom: 0; }
-.inspBar.prog b { background: #2f7a3a; }
-.inspBar span { position: relative; display: block; text-align: center; line-height: 15px; font-size: 11px; text-shadow: 0 0 2px #000; }
-.inspLbl { margin-top: 4px; color: var(--muted); }
-.inspect table { border-collapse: collapse; width: 100%; margin-top: 3px; }
+.inspOwner { color: var(--muted); margin: 2px 0 6px; }
+.inspOwner i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.inspBar { position: relative; height: 16px; background: rgba(0, 0, 0, .35); border-radius: 5px; margin: 3px 0; overflow: hidden; }
+.inspBar b { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
+.inspBar.prog b { background: #3a8f52; }
+.inspBar span { position: relative; display: block; text-align: center; line-height: 16px; font-size: 11px; font-weight: 600; text-shadow: 0 0 3px #000; }
+.inspLbl { margin-top: 5px; color: var(--muted); }
+.inspect table { border-collapse: collapse; width: 100%; margin-top: 4px; }
 .inspect th { text-align: left; font-weight: normal; color: var(--muted); padding: 1px 6px 1px 0; white-space: nowrap; }
 .inspect td { text-align: right; padding: 1px 0; }
-.inspNote { color: var(--muted); margin-top: 3px; }
-.inspect.float { position: absolute; top: 10px; right: 10px; width: 250px; background: var(--panel); opacity: 0.95; z-index: 2; box-shadow: 0 2px 8px #0008; }
-/* phones and other small screens: the page scrolls; the view takes most of the screen and the side panel
-   follows below it (portrait), or the bars scroll away above a full-screen view (landscape) */
-@media (max-width: 760px), (max-height: 500px) {
-  body { height: auto; min-height: 100%; }
-  #bar, .controls { gap: 6px 8px; padding: 6px max(8px, env(safe-area-inset-left)); }
-  .brand { display: none; }
-  .status { min-width: 0; flex-basis: 100%; font-size: 12px; }
-  .clock { min-width: 0; font-size: 12px; }
+.inspNote { color: var(--muted); margin-top: 4px; }
+.inspect.float { position: absolute; top: 12px; right: 12px; width: 260px; background: var(--glass-hi); z-index: 4; box-shadow: 0 8px 30px #0009;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+
+.viewTogs { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 12px; }
+
+/* ---- the view at the map's left edge: minimap and score strip on the right, players panel on the left (viewer.js placeSides) */
+@media (min-width: 761px) {
+  body.flip:not(.pview) .score, body.flip:not(.pview) #miniCard { left: auto; right: 12px; }
+  body.flip:not(.pview) .mapBtns { left: auto; right: 0; }
+  body.flip:not(.pview) .inspect.float { right: auto; left: 12px; }
+}
+
+/* ---- short landscape windows (phones on their side): smaller panels */
+@media (max-height: 500px) and (min-width: 761px) {
+  #side { width: 250px; padding: 8px; gap: 6px; }
+  #mini { width: 128px; height: 128px; }
+  #controls { padding: 4px 10px 6px; }
+  .score { width: 150px; max-height: calc(100% - var(--hud-b) - 208px); }
+}
+
+/* ---- phones (portrait): the page scrolls; bar, map, timeline, minimap + panel stacked */
+@media (max-width: 760px) {
+  body { overflow: auto; height: auto; min-height: 100%; }
+  #stage { height: auto; overflow: visible; display: flex; flex-direction: column; gap: 8px; padding: 8px max(8px, env(safe-area-inset-left)); }
+  .glass, .score, #controls, #side, #miniCard, #bar { position: static !important; transform: none !important; inset: auto; }
+  #miniCard { position: relative !important; }
+  body.playing #bar { opacity: 1; pointer-events: auto; }
+  body.idle :is(#bar, #controls) { opacity: 1; transform: none; pointer-events: auto; }
+  #bar { order: 0; gap: 6px 8px; padding: 8px 10px; max-width: none !important; }
+  body:has(#controls[hidden]) #bar { width: auto; margin-top: 18svh; }
+  .brand { font-size: 13px; }
+  .status { flex-basis: 100%; max-width: none !important; white-space: normal !important; }
+  .score { order: 1; width: auto; max-height: none; flex-direction: row; overflow-x: auto; gap: 6px; }
+  .team { flex: none; flex-direction: row; }
+  .tl { writing-mode: vertical-rl; transform: rotate(180deg); padding: 0; }
+  .pc { width: 104px; }
+  body.seek-show #viewWrap { bottom: auto; }
+  #viewWrap { order: 2; position: relative; inset: auto; height: 62svh; border-radius: var(--r); overflow: hidden; }
+  body.pview #viewWrap { height: auto; aspect-ratio: 4 / 3; max-height: 75svh; }   /* the game's 640x480 screen */
+  #controls { order: 3; }
+  #miniCard { order: 4; align-self: flex-start; }
+  #miniCard { display: flex; flex-direction: column; gap: 6px; }
+  .mapBtns { position: static; order: -1; }
+  #mini { width: 160px; height: 160px; }
+  #side { order: 5; width: auto; overflow: visible; }
+  body.sideMin #side { display: flex; }
+  #sideOpen { display: none !important; }
   .btn { padding: 7px 12px; }
   select { padding: 6px 4px; }
-  input[type=checkbox] { width: 18px; height: 18px; vertical-align: -4px; }
-  label { white-space: nowrap; }
-}
-@media (max-width: 760px) {
-  main { flex-direction: column; flex: none; }
-  #viewWrap { height: 62svh; flex: none; }
-  body.pview #viewWrap { height: auto; aspect-ratio: 4 / 3; max-height: 75svh; }   /* the game's 640x480 screen */
-  #seek { order: 10; flex-basis: 100%; height: 28px; }
-  .audio { flex-wrap: wrap; }
-  #side { width: 100%; border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
-  #mini { width: 50%; max-width: 220px; }
-  body.pview #side { display: flex; }      /* the player view has its own minimap; keep the card, players and events */
-  body.pview #mini { display: none; }
-  #inspect { order: -1; }                  /* player view: the tapped unit's card right below the screen */
+  input[type=checkbox] { width: 18px; height: 18px; }
+  .clock { font-size: 12px; }
+  .audio { margin-left: 0; }
+  #volume, #voiceVol, #fxVol { width: 56px; }
+  #micVol { display: none; }
+  body.pview #side { display: flex !important; }      /* the player view has its own minimap; keep the card, players and events */
+  #inspect { order: -1; }
   .inspect { font-size: 13px; }
-  .inspect.float { top: auto; right: 6px; left: 6px; bottom: 6px; width: auto; max-height: 45%; overflow-y: auto; }
-  #volume, #voiceVol, #fxVol, #micVol { width: 56px; }
+  .inspect.float { position: absolute; top: auto; right: 6px; left: 6px; bottom: 6px; width: auto; max-height: 45%; overflow-y: auto; }
   .inspX { font-size: 22px; padding: 0 6px; }
-  .log { flex: none; max-height: 40svh; }
-  .log div { white-space: normal; }
+  .talkers { top: 8px; max-width: 90%; }
 }
-@media (max-height: 500px) and (min-width: 761px) {
-  main { flex: none; height: 100svh; }
-  #side { width: 240px; padding: 6px; }
-}
-/* microphones (CamRec): per-player button in the players list, talking names over the map */
-#micVol { width: 70px; accent-color: var(--accent); vertical-align: middle; }
-.micBtn { font: 11px system-ui, sans-serif; margin-left: 6px; padding: 0 5px; border-radius: 8px; border: 1px solid #3a3e48; background: #2b2e36; color: var(--muted); cursor: pointer; vertical-align: 1px; }
-.micBtn.talk { background: #3d6b3a; color: #fff; border-color: #5aa055; }
-.micBtn.on { color: #fff; border-color: #6a8fd0; background: #2f4670; }
-.micBtn.talk:not(.on) { background: #2b3a2a; color: #9fc49a; border-style: dashed; }
-.talkers span.quiet { opacity: .55; }
-.btn.tog:not(.on) { opacity: .6; }
-.btn.tog.on { border-color: #6a8fd0; }
-.talkers { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-width: 90%; z-index: 2; pointer-events: none; }
-.talkers span { background: #000b; color: #fff; border-radius: 12px; padding: 2px 10px 2px 6px; font-size: 13px; }
-.talkers i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; box-shadow: 0 0 0 2px #fff4; }
-@media (max-width: 760px) { #micVol { display: none; } }

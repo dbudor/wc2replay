@@ -7,59 +7,98 @@
 <link rel="stylesheet" href="viewer.css">
 </head>
 <body>
-<header id="bar">
-  <strong class="brand">War2 replay</strong>
-  <label class="btn file">Game files…<input id="files" type="file" multiple accept=".exe,.mpq,.w2r,.gz,.pud,.pcap,.pcapng,.cap,.wav,.w2p,.w2c"></label>
-  <label id="listBox" hidden title="Replays and captures in the replays folder next to the viewer (serve.py --replays DIR picks another folder)">Replays <select id="replayList"></select></label>
-  <label id="rulesBox" title="Game rules: a capture does not say which War2Combat plugins the players had loaded. Auto tries the original rules and the Peon2k releases (plugin/peon2kvision.w2p or peon2k.w2p of your game folder first, if present) and keeps the one the capture's sync bytes agree with. Score-only and vision-only differences cannot be detected: the game folder's plugin decides, or pick here.">Rules <select id="rules">
-    <option value="auto">auto</option><option value="0">original</option><option value="256">Peon2k 0.2.2</option><option value="512">Peon2k 0.2.3</option>
-    <option value="1280">Peon2k 0.2.2.1</option><option value="3328">Peon2k 0.2.2.1 vision</option><option value="1536">Peon2k 0.2.3.1</option><option value="3584">Peon2k 0.2.3.1 vision</option>
-  </select></label>
-  <label id="peerBox" hidden title="The player whose view the replay takes (a capture holds every player's packets)">View of <select id="peer"></select></label>
-  <button id="save" class="btn" hidden title="Download the replay converted from the capture (a small .w2r file to share)">Save .w2r</button>
-  <span id="status" class="status">Pick <code>Warcraft II BNE.exe</code>, <code>War2Dat.mpq</code> (+ <code>War2Patch.mpq</code>), a <code>.w2r</code> (or <code>.w2r.gz</code>) replay or a <code>.pcapng</code>/<code>.pcap</code> capture of an IPX game and, for custom maps, its <code>.pud</code>. Files stay in this browser.</span>
-</header>
-<div id="controls" class="controls" hidden>
-  <button id="play" class="btn" title="Play / pause (space)">Play</button>
-  <button id="back10" class="btn" title="Back 10 s (←)">−10s</button>
-  <button id="step" class="btn" title="Step one turn (.)">Step</button>
-  <button id="fwd10" class="btn" title="Forward 10 s (→)">+10s</button>
-  <select id="speed" title="Playback speed">
-    <option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option><option value="0">max</option>
-  </select>
-  <input id="seek" type="range" min="0" max="1" value="0" step="1" title="Seek (re-boots and fast-forwards when going back)">
-  <span id="clock" class="clock">turn 0 · tick 0 · 0:00</span>
-  <span class="audio">
-    <label title="Volume. Sound starts with your first click or key press">vol <input id="volume" type="range" min="0" max="100" value="70"></label>
-    <label title="Unit voices: selection / acknowledge (and, in the player view, its notices). The checkbox: in the free view, also the selection / acknowledge voices of the Fog-of-war player's clicks (of the recording machine's player with fog "all"); the player view always plays them."><input id="voices" type="checkbox"> voices <input id="voiceVol" type="range" min="0" max="100" value="100" title="Voice volume"></label>
-    <label title="Sound effects: combat, buildings, spells...">fx <input id="fxVol" type="range" min="0" max="100" value="100"></label>
-    <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> mics <input id="micVol" type="range" min="0" max="400" value="100" title="Microphone volume"></label>
-      <label title="Listen only to the player picked in Fog of war (keys 1-8); with fog &quot;all&quot;, to the mics picked in the players list"><input id="micLink" type="checkbox" checked> follows view</label></span>
-  </span>
-  <span id="pvSlot" class="pvSlot"></span>
-</div>
-<main>
-  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div><div id="talkers" class="talkers" hidden></div></div>
-  <aside id="side">
-    <canvas id="mini" width="192" height="192" title="Click or drag to move the view"></canvas>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 4h4.5v16H6zM13.5 4H18v16h-4.5z" fill="currentColor"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M11 6v12L2.5 12zM21 6v12l-8.5-6z" fill="currentColor"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M13 6v12l8.5-6zM3 6v12l8.5-6z" fill="currentColor"/></symbol>
+  <symbol id="i-step" viewBox="0 0 24 24"><path d="M5 5v14l10-7zM16.5 5H19v14h-2.5z" fill="currentColor"/></symbol>
+  <symbol id="i-fog" viewBox="0 0 24 24"><path d="M7 18h10.5a4.5 4.5 0 0 0 .6-8.96A6 6 0 0 0 6.5 8.1 5 5 0 0 0 7 18z" fill="currentColor"/></symbol>
+  <symbol id="i-follow" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="6.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></g><circle cx="12" cy="12" r="2" fill="currentColor"/></symbol>
+  <symbol id="i-pview" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="13" rx="1.5"/><path d="M8 21h8M12 17v4"/></g><rect x="5.5" y="6.5" width="4" height="4" fill="currentColor"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-unfull" viewBox="0 0 24 24"><path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-score" viewBox="0 0 24 24"><g fill="currentColor"><rect x="3" y="4" width="4" height="4" rx="1"/><rect x="3" y="10" width="4" height="4" rx="1"/><rect x="3" y="16" width="4" height="4" rx="1"/><rect x="9" y="5" width="12" height="2" rx="1"/><rect x="9" y="11" width="12" height="2" rx="1"/><rect x="9" y="17" width="12" height="2" rx="1"/></g></symbol>
+  <symbol id="i-seek" viewBox="0 0 24 24"><rect x="2.5" y="13" width="19" height="7" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 16.5h8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="14" cy="16.5" r="1.8" fill="currentColor"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8"/></g></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM14 5v14" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+</svg>
+<main id="stage">
+  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div><div id="talkers" class="talkers" hidden></div><div id="toast" class="toast" hidden></div></div>
+  <div id="cover" class="cover" hidden><div class="coverBox"><span class="logo">W2</span><span id="coverText">Opening the shared replay…</span></div></div>
+
+  <header id="bar" class="glass">
+    <strong class="brand"><span class="logo">W2</span>War2 <em>Replay</em></strong>
+    <label class="btn file">Game files…<input id="files" type="file" multiple accept=".exe,.mpq,.w2r,.gz,.pud,.pcap,.pcapng,.cap,.wav,.w2p,.w2c"></label>
+    <label id="listBox" class="field" hidden title="Replays and captures in the replays folder next to the viewer (serve.py --replays DIR picks another folder)"><span>Replay</span><select id="replayList"></select></label>
+    <label id="rulesBox" class="field" hidden title="Game rules: a capture does not say which War2Combat plugins the players had loaded. Auto tries the original rules and the Peon2k releases (plugin/peon2kvision.w2p or peon2k.w2p of your game folder first, if present) and keeps the one the capture's sync bytes agree with. Score-only and vision-only differences cannot be detected: the game folder's plugin decides, or pick here."><span>Rules</span><select id="rules">
+      <option value="auto">auto</option><option value="0">original</option><option value="256">Peon2k 0.2.2</option><option value="512">Peon2k 0.2.3</option>
+      <option value="1280">Peon2k 0.2.2.1</option><option value="3328">Peon2k 0.2.2.1 vision</option><option value="1536">Peon2k 0.2.3.1</option><option value="3584">Peon2k 0.2.3.1 vision</option>
+    </select></label>
+    <label id="peerBox" class="field" hidden title="The player whose view the replay takes (a capture holds every player's packets)"><span>View of</span><select id="peer"></select></label>
+    <span id="shareBox" class="shareBox" hidden>
+      <button id="share" class="btn shareBtn" title="Copy a link to this replay at this moment: time, view, zoom, watched player, fog, follow, player view and microphones. The link plays from there"><svg><use href="#i-share"/></svg>Share</button>
+      <label class="field" title="The shared link plays from its moment and pauses after this many seconds of game time (0: does not pause; -1: stays paused at the moment)">pause after <input id="pauseAfter" type="number" min="-1" max="3600" step="1" value="10"> s</label>
+    </span>
+    <button id="save" class="btn" hidden title="Download the replay converted from the capture (a small .w2r file to share)">Save .w2r</button>
+    <span id="status" class="status">Pick <code>Warcraft II BNE.exe</code>, <code>War2Dat.mpq</code> (+ <code>War2Patch.mpq</code>), a <code>.w2r</code> (or <code>.w2r.gz</code>) replay or a <code>.pcapng</code>/<code>.pcap</code> capture of an IPX game and, for custom maps, its <code>.pud</code>. Files stay in this browser.</span>
+  </header>
+
+  <div id="score" class="score" hidden></div>
+
+  <aside id="side" class="glass">
+    <div class="sideHead">
+      <span id="sideTitle" class="sideTitle">Players</span>
+    </div>
     <div class="row" id="viewRow">
       <span id="viewOpts" class="viewOpts">
-        <label>Fog of war <select id="fog" title="View as player: keys 1-8; 9 = no fog"><option value="-1">all (no fog)</option></select></label>
-        <label title="See the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"> Player view</label>
-        <button id="fogBtn" class="btn tog on" hidden aria-pressed="true" title="Show or hide this player's fog of war; the view stays on this player (F)">Fog</button>
-        <button id="follow" class="btn tog" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)">Follow</button>
+        <label class="field">Fog <select id="fog" title="View as player: keys 1-8; 9 = no fog"><option value="-1">all (no fog)</option></select></label>
       </span>
-      <label title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
-      <label id="camBox" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
     </div>
     <div id="inspect" class="inspect" hidden></div>
     <div id="players"></div>
-    <div class="row logHead"><strong>Events</strong>
-      <label><input id="logSounds" type="checkbox"> sounds</label>
-      <label><input id="logVoices" type="checkbox" checked> voices</label>
-    </div>
-    <div id="log" class="log"></div>
   </aside>
+
+  <div id="miniCard" class="glass"><canvas id="mini" width="192" height="192" title="Click or drag to move the view"></canvas>
+    <div id="mapBtns" class="mapBtns">
+      <button id="fogBtn" class="iconBtn mapBtn on" hidden aria-pressed="true" title="Show or hide this player's fog of war; the view stays on this player (F)"><svg><use href="#i-fog"/></svg></button>
+      <button id="follow" class="iconBtn mapBtn" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)"><svg><use href="#i-follow"/></svg></button>
+      <button id="scoreBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the score strip (S)"><svg><use href="#i-score"/></svg></button>
+      <button id="seekBtn" class="iconBtn mapBtn" data-mode="auto" title="Timeline: auto (fades while playing) (T)"><svg><use href="#i-seek"/></svg></button>
+      <button id="sideOpen" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the players panel (Y)"><svg><use href="#i-panel"/></svg></button>
+      <label class="iconBtn mapBtn pvBtn" title="Player view: the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"><svg><use href="#i-pview"/></svg></label>
+    </div></div>
+
+  <div id="controls" class="controls glass" hidden>
+    <div class="timeline">
+      <input id="seek" type="range" min="0" max="1" value="0" step="1" title="Seek (re-boots and fast-forwards when going back)">
+    </div>
+    <div class="ctlRow">
+      <div class="transport">
+        <button id="back10" class="iconBtn" title="Back 10 s (←)"><svg><use href="#i-back"/></svg></button>
+        <button id="play" class="iconBtn big" title="Play / pause (space)"><svg><use href="#i-play"/></svg></button>
+        <button id="fwd10" class="iconBtn" title="Forward 10 s (→)"><svg><use href="#i-fwd"/></svg></button>
+        <button id="step" class="iconBtn" title="Step one turn (.)"><svg><use href="#i-step"/></svg></button>
+        <select id="speed" class="speed" title="Playback speed">
+          <option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option><option value="0">max</option>
+        </select>
+      </div>
+      <span id="clock" class="clock">0:00</span>
+      <span class="viewTogs">
+        <label class="chk" title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
+        <label id="camBox" class="chk" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
+      </span>
+      <span id="pvSlot" class="pvSlot"></span>
+      <span class="audio">
+        <label title="Volume. Sound starts with your first click or key press"><span class="lbl">vol</span> <input id="volume" type="range" min="0" max="100" value="70"></label>
+        <label title="Unit voices: selection / acknowledge (and, in the player view, its notices). The checkbox: in the free view, also the selection / acknowledge voices of the Fog-of-war player's clicks (of the recording machine's player with fog &quot;all&quot;); the player view always plays them."><input id="voices" type="checkbox"> <span class="lbl">voices</span> <input id="voiceVol" type="range" min="0" max="100" value="100" title="Voice volume"></label>
+        <label title="Sound effects: combat, buildings, spells..."><span class="lbl">fx</span> <input id="fxVol" type="range" min="0" max="100" value="100"></label>
+        <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> <span class="lbl">mics</span> <input id="micVol" type="range" min="0" max="400" value="100" title="Microphone volume"></label>
+          <label title="Listen only to the player picked in Fog of war (keys 1-8); with fog &quot;all&quot;, to the mics picked in the players list"><input id="micLink" type="checkbox" checked> <span class="lbl">follows view</span></label></span>
+      </span>
+      <button id="fullBtn" class="iconBtn" hidden title="Full screen (X)"><svg><use href="#i-full"/></svg></button>
+    </div>
+  </div>
 </main>
 <script type="module" src="viewer.js"></script>
 </body>
