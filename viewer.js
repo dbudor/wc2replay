@@ -1299,13 +1299,16 @@ function placeHud() {
   if (narrow.matches || st.pv.on) { ui.side.style.cssText = ui.score.style.cssText = ''; ui.side._k = ui.score._k = ''; return; }
   const flip = document.body.classList.contains('flip'), near = flip ? 'right' : 'left', far = flip ? 'left' : 'right';
   const panel = !document.body.classList.contains('sideMin'), Hs = ui.score.offsetHeight;   // 0 while hidden
-  const bottom = miniCard.getBoundingClientRect().top - 52;   // above the minimap's button row
+  // desktop: the buttons are a row above the minimap; a phone on its side has them as a column along the edge, so the
+  // panel and the score strip start past it (and may reach down to the minimap)
+  const col = lsPhone.matches, x0 = col ? 12 + $('mapBtns').offsetWidth + 8 : 12;
+  const bottom = miniCard.getBoundingClientRect().top - (col ? 8 : 52);
   const stack = !panel || 12 + (Hs && Hs + 8) + ui.side.scrollHeight <= bottom, top = stack ? 12 + (Hs && Hs + 8) : 12;
   const sw = panel ? ui.side.offsetWidth : 0, cw = ui.score.offsetWidth;
   const set = (el, css) => { if (el._k !== css) { el.style.cssText = css; el._k = css; } };
-  set(ui.side, `${near}: 12px; ${far}: auto; top: ${top}px; max-height: ${Math.max(120, bottom - top)}px;`);
-  set(ui.score, `${near}: ${stack ? 12 : 12 + sw + 8}px; ${far}: auto;`);
-  hudW = Math.max(miniCard.offsetWidth, stack ? Math.max(sw, cw) : sw + 8 + cw);
+  set(ui.side, `${near}: ${x0}px; ${far}: auto; top: ${top}px; max-height: ${Math.max(col ? 80 : 120, bottom - top)}px;`);
+  set(ui.score, `${near}: ${stack ? x0 : x0 + sw + 8}px; ${far}: auto;`);
+  hudW = Math.max(miniCard.offsetWidth, x0 - 12 + (stack ? Math.max(sw, cw) : sw + 8 + cw));
 }
 // ---- the players panel can be folded away (Y, or its button above the minimap); remembered per browser
 // Panel / score strip / minimap choices are remembered per mode (desktop, upright phone '.p', phone on its side '.ls');

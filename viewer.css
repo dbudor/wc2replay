@@ -278,7 +278,10 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
   body.setOpen .pvSlot:empty { display: none; }
   #volume, #voiceVol, #fxVol, #micVol { width: 64px; }
   input[type=checkbox] { width: 18px; height: 18px; }
-  .mapBtns { gap: 5px; }
+  /* the buttons: a column along the edge above the minimap; a second column when the screen is too short */
+  .mapBtns { gap: 5px; flex-direction: column; flex-wrap: wrap; align-content: flex-start; max-height: calc(100svh - var(--hud-b) - 150px); }
+  body.miniOff .mapBtns { max-height: calc(100svh - var(--hud-b) - 16px); }
+  body.flip .mapBtns { flex-wrap: wrap-reverse; align-content: flex-end; }
   .mapBtn { width: 34px; height: 34px; border-radius: 9px; }
   .mapBtn svg { width: 17px; height: 17px; }
   .btn { padding: 7px 12px; }
@@ -301,6 +304,8 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
   #controls { position: relative; grid-row: 3; left: auto; right: auto; bottom: auto; border-radius: 0; border-width: 1px 0 0; box-shadow: none; }
   body.idle #controls { opacity: 1; transform: none; pointer-events: auto; }
   #miniCard { left: 8px; bottom: calc(var(--ctl-h, 50px) + 60px); padding: 4px; }
+  .mapBtns { max-height: calc(100svh - var(--ctl-h, 50px) - 330px); }   /* between the score strip and the minimap */
+  body.miniOff .mapBtns { max-height: calc(100svh - var(--ctl-h, 50px) - 230px); }
   #mini { width: 96px; height: 96px; }
   #side { left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(var(--ctl-h, 50px) + 8px) !important; width: auto; max-height: 44px !important;
     overflow: hidden; padding: 10px 12px; gap: 8px; transition: max-height .25s ease; }
