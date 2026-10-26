@@ -61,6 +61,18 @@ export async function convertDetectRules({ module, exe, files, pud, convert, can
   }
   return { ...best, tried };
 }
+// Game tick after each turn of a .w2r (TURN chunks' tick_count), or null when they are not stamped (all 0).
+export function w2rTurnTicks(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength), out = [];
+  let any = false;
+  for (let o = 8; o + 8 <= b.length;) {
+    const tag = String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]), len = dv.getUint32(o + 4, true);
+    if (tag === 'TURN' && len >= 24) { const t = dv.getUint32(o + 8 + 16, true); out.push(t); if (t) any = true; }
+    if (tag === 'END ') break;
+    o += 8 + len;
+  }
+  return any ? Uint32Array.from(out) : null;
+}
 // Turn count of a .w2r ("W2R1", u32 version, chunks {u32 tag, u32 len, data}; END = u32 turn count).
 export function w2rTurnCount(b) {
   const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
@@ -70,6 +82,13 @@ export function w2rTurnCount(b) {
     o += 8 + len;
   }
   return 0;
+}
+
+const PAGE_WORDS = 16384;   // 64 KB wasm pages
+function pageHash(v, p) {
+  let x = 0x811c9dc5 | 0, y = 0;
+  for (let i = p * PAGE_WORDS, e = i + PAGE_WORDS; i < e; i++) { const w = v[i]; x = Math.imul(x ^ w, 16777619); y = (y + w) | 0; }
+  return [x >>> 0, y >>> 0];
 }
 
 export class SimSession {
@@ -128,6 +147,32 @@ export class SimSession {
     return st;
   }
   get tick() { return this.X.w2w_tick_count(); }
+
+  // ---- state dumps (the viewer's seek cache). The whole state is the wasm memory (the module's only mutable global
+  // is the stack pointer, back at its start between calls) plus the fields below. A dump keeps only the 64 KB pages
+  // that differ from the freshly booted game (pageHashes() of a fresh boot of the same replay and rules: about 22 of
+  // 2846 pages, ~1.4 MB); restore() goes into a fresh boot of it. Pages compare by two 32-bit hashes: a page that
+  // changed and still matched both would make the restored game diverge, which the per-turn replay hash catches.
+  pageHashes() {
+    const v = new Int32Array(this.X.memory.buffer), np = v.length / PAGE_WORDS, h = new Uint32Array(2 * np);
+    for (let p = 0; p < np; p++) { const [x, y] = pageHash(v, p); h[2 * p] = x; h[2 * p + 1] = y; }
+    return h;
+  }
+  dump(base) {
+    const v = new Int32Array(this.X.memory.buffer), np = v.length / PAGE_WORDS, nb = base.length / 2, pages = [];
+    for (let p = 0; p < np; p++) {
+      if (p < nb) { const [x, y] = pageHash(v, p); if (x === base[2 * p] && y === base[2 * p + 1]) continue; }
+      pages.push([p, new Int32Array(v.subarray(p * PAGE_WORDS, (p + 1) * PAGE_WORDS))]);
+    }
+    return { bytes: v.byteLength, pages, turn: this.turn, ended: this.ended, lastStatus: this.lastStatus, mismatch: this.mismatch, hookSeq: this.hookSeq };
+  }
+  restore(d) {
+    const mem = this.X.memory, more = (d.bytes - mem.buffer.byteLength) / (PAGE_WORDS * 4);
+    if (more > 0) mem.grow(more);
+    const v = new Int32Array(mem.buffer);
+    for (const [p, words] of d.pages) v.set(words, p * PAGE_WORDS);
+    Object.assign(this, { turn: d.turn, ended: d.ended, lastStatus: d.lastStatus, mismatch: d.mismatch, hookSeq: d.hookSeq, fromDump: true });
+  }
   get hash() { return this.X.w2w_replay_hash() >>> 0; }
 
   // Arena views (re-created on every call: memory.grow detaches old ones). Address a -> u8[base + a].

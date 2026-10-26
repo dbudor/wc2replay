@@ -36,7 +36,7 @@
   <symbol id="i-panel" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM14 5v14" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
 </svg>
 <main id="stage">
-  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div><div id="balloons" class="balloons"></div><div id="talkers" class="talkers" hidden></div><div id="toast" class="toast" hidden></div></div>
+  <div id="viewWrap"><canvas id="view"></canvas><div id="drop" class="drop" hidden>Drop game files here</div><div id="balloons" class="balloons"></div><div id="busy" class="busy" hidden><i class="spin"></i><span></span><b><i></i></b></div><div id="talkers" class="talkers" hidden></div><div id="toast" class="toast" hidden></div></div>
   <div id="cover" class="cover" hidden><button id="coverPlay" class="coverPlay" title="Play"><svg><use href="#i-play"/></svg></button><div id="coverText" class="coverText"></div></div>
 
   <header id="bar" class="glass">
@@ -85,19 +85,23 @@
 
   <div id="controls" class="controls glass" hidden>
     <div class="timeline">
-      <input id="seek" type="range" min="0" max="1" value="0" step="1" title="Seek (re-boots and fast-forwards when going back)">
+      <input id="seek" type="range" min="0" max="1" value="0" step="1" aria-label="Seek">
+      <output id="seekTip" class="seekTip" hidden></output>
     </div>
     <div class="ctlRow">
       <div class="transport">
+        <button id="back60" class="iconBtn txt" title="Back 1 min (Shift+←)">−1m</button>
         <button id="back10" class="iconBtn" title="Back 10 s (←)"><svg><use href="#i-back"/></svg></button>
         <button id="play" class="iconBtn big" title="Play / pause (space)"><svg><use href="#i-play"/></svg></button>
         <button id="fwd10" class="iconBtn" title="Forward 10 s (→)"><svg><use href="#i-fwd"/></svg></button>
+        <button id="fwd60" class="iconBtn txt" title="Forward 1 min (Shift+→)">+1m</button>
         <button id="step" class="iconBtn" title="Step one turn (.)"><svg><use href="#i-step"/></svg></button>
         <select id="speed" class="speed" title="Playback speed">
-          <option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option><option value="0">max</option>
+          <option value="0.25">¼×</option><option value="0.5">½×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option><option value="0">max</option>
         </select>
       </div>
-      <span id="clock" class="clock">0:00</span>
+      <span id="clock" class="clock" role="button" tabindex="0" title="Go to a time: click and type it (G)">0:00</span>
+      <input id="timeIn" class="timeIn" hidden autocomplete="off" spellcheck="false" inputmode="text" placeholder="m:ss" title="Game time to go to: h:mm:ss, m:ss, or minutes. Enter goes, Esc cancels">
       <span class="viewTogs">
         <label class="chk" title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
         <label id="camBox" class="chk" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
