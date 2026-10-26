@@ -190,6 +190,26 @@ body.noScore .score { display: none !important; }
 #seek::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgba(240, 180, 60, .35); }
 #seek:hover::-webkit-slider-runnable-track { height: 7px; }
 #seek:hover::-webkit-slider-thumb { transform: scale(1.15); margin-top: -3.5px; }
+/* the time under the pointer / thumb while seeking */
+.seekTip { position: absolute; bottom: 20px; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; pointer-events: none;
+  background: rgba(10, 12, 16, .92); border: 1px solid var(--edge); color: var(--text); font-size: 12px; font-weight: 600; line-height: 1.2;
+  font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 4px 12px #0007; }
+.clock { cursor: text; border-radius: 6px; padding: 1px 4px; margin: -1px -4px; }
+.clock:hover { background: rgba(255, 255, 255, .08); }
+.timeIn { width: 84px; padding: 3px 7px; border-radius: 6px; border: 1px solid var(--accent); background: rgba(0, 0, 0, .45); color: var(--text);
+  font-size: 15px; font-weight: 700; font-family: inherit; font-variant-numeric: tabular-nums; outline: none; }
+.timeIn.bad { border-color: #e55; }
+.iconBtn.txt { width: auto; min-width: 32px; padding: 0 6px; border-radius: 16px; font-size: 11px; font-weight: 700; line-height: 1; color: var(--muted); }
+.iconBtn.txt:hover { color: var(--text); }
+/* seeking: no map, a running indicator */
+.busy { position: absolute; inset: 0; z-index: 1; display: grid; place-content: center; justify-items: center; gap: 12px;
+  background: var(--bg, #07090c); color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; pointer-events: none; }
+.busy .spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .14); border-top-color: var(--accent);
+  animation: busySpin .8s linear infinite; }
+@keyframes busySpin { to { transform: rotate(1turn); } }
+.busy b { display: block; width: 180px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .14); overflow: hidden; }
+.busy b i { display: block; height: 100%; width: 0; background: var(--accent); }
+body.seeking .balloons, body.seeking .talkers { display: none; }
 .ctlRow { display: flex; align-items: center; gap: 10px 18px; flex-wrap: wrap; }
 .transport { display: flex; align-items: center; gap: 4px; }
 .speed { margin-left: 6px; font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -323,6 +343,8 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
 
 /* ---- P: upright phone */
 @media (max-width: 760px) and (min-height: 501px) {
+  #back60, #fwd60 { display: none; }   /* no room: type the time on the clock instead */
+  .timeIn { width: 64px; font-size: 13px; order: 3; }
   .balloon.caption { bottom: 12px; }
   #stage { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100svh; }
   body:has(#controls[hidden]) #bar { width: calc(100% - 24px); padding: 18px; }

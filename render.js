@@ -20,15 +20,16 @@ import { PaletteCycler } from './tileset.js';
 
 export const OWNER_FALLBACK = ['#c00000', '#0048cc', '#2cb494', '#9848b0', '#f88c14', '#28283c', '#e0e0e0', '#fcfc48'];
 
-export class FogTracker {   // per-player "ever seen" masks, fed once per turn
-  constructor(n) { this.n = n; this.seen = Array.from({ length: 8 }, () => new Uint8Array(n * n)); }
-  update(m) {
-    const fs = m.r32(A.FogSeenMask), u8 = m.u8, b = m.base + fs, n2 = this.n * this.n;
-    for (let i = 0; i < n2; i++) {
-      const v = ~u8[b + i] & 0xff;
-      if (v) for (let p = 0; p < 8; p++) if (v & (1 << p)) this.seen[p][i] = 1;
-    }
+export class FogTracker {   // per-player "ever seen" masks, fed once per turn: bits[i] bit p = cell i seen by player p
+  constructor(n) { this.n = n; this.bits = new Uint8Array(n * n); }
+  update(m) {   // OR in the cells each player sees now (FogSeenMask: bit p clear = visible to p), 4 cells a step
+    const n2 = this.n * this.n, b = m.base + m.r32(A.FogSeenMask), u8 = m.u8, bits = this.bits;
+    if (b % 4 === 0 && n2 % 4 === 0) {
+      const src = new Int32Array(u8.buffer, u8.byteOffset + b, n2 >> 2), dst = new Int32Array(bits.buffer, bits.byteOffset, n2 >> 2);
+      for (let i = 0; i < src.length; i++) dst[i] |= ~src[i];
+    } else for (let i = 0; i < n2; i++) bits[i] |= ~u8[b + i];
   }
+  seen(p, i) { return (this.bits[i] >> p) & 1; }
 }
 
 export class MapRenderer {
@@ -116,14 +117,14 @@ export class MapRenderer {
     if (!this.fogImg) this.fogImg = ctx.createImageData(n, n);
     const d = this.fogImg.data, u8 = m.u8;
     const seen = m.base + m.r32(A.FogSeenMask), expl = m.base + m.r32(A.FogExplored), vis = m.base + m.r32(A.FogVisible);
-    const local = p === m.r8(A.LocalPlayer), bit = 1 << p, ever = fogTracker ? fogTracker.seen[p] : null;
+    const local = p === m.r8(A.LocalPlayer), bit = 1 << p, ever = fogTracker ? fogTracker.bits : null;
     for (let i = 0; i < n * n; i++) {
       let a;
       if (local) {   // the game's own levels for the local player: 0 = clear .. 16 = fogged
         const e = u8[expl + i], v = u8[vis + i];
         a = Math.max(0.92 * Math.min(16, e) / 16, 0.45 * Math.min(16, v) / 16);
       } else {
-        a = !(u8[seen + i] & bit) ? 0 : (ever && ever[i]) ? 0.45 : 0.92;
+        a = !(u8[seen + i] & bit) ? 0 : (ever && ever[i] & bit) ? 0.45 : 0.92;
       }
       d[4 * i] = 0; d[4 * i + 1] = 0; d[4 * i + 2] = 0; d[4 * i + 3] = Math.round(a * 255);
     }
@@ -136,7 +137,7 @@ export class MapRenderer {
     const i = ty * n + tx;
     if (!(m.u8[m.base + m.r32(A.FogSeenMask) + i] & (1 << this.fogPlayer))) return 2;
     if (this.fogPlayer === m.r8(A.LocalPlayer)) return m.u8[m.base + m.r32(A.FogExplored) + i] < 16 ? 1 : 0;
-    return fogTracker && fogTracker.seen[this.fogPlayer][i] ? 1 : 0;
+    return fogTracker && fogTracker.seen(this.fogPlayer, i) ? 1 : 0;
   }
 
   // Draw the view. view = {x, y, scale} (top-left in map pixels), W/H in screen pixels.

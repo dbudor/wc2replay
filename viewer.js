@@ -67,7 +67,7 @@
 
 import { MpqArchive, MpqSet } from './mpq.js';
 import { bootFileNames } from './files.js';
-import { SimSession, compileSim, convertDetectRules } from './sim.js';
+import { SimSession, compileSim, convertDetectRules, w2rTurnTicks } from './sim.js';
 import { parseCapture, convertCapture, CaptureError, crc32, withLocalQuit } from './pcap.js';
 import { loadTileset } from './tileset.js';
 import { MapRenderer, FogTracker } from './render.js';
@@ -93,7 +93,7 @@ const mic = new MicPlayer(audio);   // the players' microphones (CamRec)
 audio.bindControls({ volume: $('volume'), voiceVolume: $('voiceVol'), fxVolume: $('fxVol'), voices: $('voices') });
 const ui = { status: $('status'), controls: $('controls'), play: $('play'), step: $('step'), speed: $('speed'), seek: $('seek'),
   clock: $('clock'), view: $('view'), mini: $('mini'), fog: $('fog'), hp: $('hp'), players: $('players'), log: $('log'),
-  drop: $('drop'), wrap: $('viewWrap'),
+  drop: $('drop'), wrap: $('viewWrap'), busy: $('busy'),
   peerBox: $('peerBox'), peer: $('peer'), save: $('save'), share: $('share'), shareBox: $('shareBox'), pauseAfter: $('pauseAfter'), rules: $('rules'),
   pview: $('pview'), follow: $('follow'), fogBtn: $('fogBtn'), micLink: $('micLink'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
   camShow: $('camShow'), camBox: $('camBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect'),
@@ -115,6 +115,11 @@ const st = {
   free: { follow: false, cam: new PlayerCamera() },   // L in the free view: follow the watched player's camera
   cam: { tracks: new Map(), curBytes: [], cursors: [] },   // recorded cameras by player; Art\h_arrow.cur / o_arrow.cur
   stepClock: null,       // { from: g_TickCount before the last step, t } while playing (smooth camera time)
+  turnTicks: null,       // the replay's game tick after each turn (time <-> turn), null when not stamped
+  dumps: new Map(),      // minute -> state dump (seek cache: the last five made); dumpBase: page hashes of a fresh boot
+  dumpBase: null, dumpMin: 0,
+  seekGoal: null,        // { turn, from } while seeking; busyT0: when it started
+  busyT0: 0,
 };
 const setStatus = (msg, err = false) => {
   ui.status.textContent = msg; ui.status.title = msg; ui.status.classList.toggle('err', err);
@@ -478,6 +483,7 @@ async function start({ intro = false } = {}) {
 }
 async function startSession(intro) {
   st.totalTurns = replayTurnCount(picked.replay);
+  st.turnTicks = w2rTurnTicks(picked.replay); st.dumps.clear(); st.dumpBase = null;   // a new replay (or rules): new dumps
   st.match = parseMatch(picked.replay);
   st.tracker = new GameTracker(picked.replay);
   st.screen = null; st.outroClosed = false;
@@ -708,6 +714,8 @@ async function boot() {
 }
 function attach(s) {
   st.session = s;
+  if (!st.dumpBase) st.dumpBase = s.pageHashes();   // a fresh boot: what the dumps are told apart from
+  st.dumpMin = 0;
   if (st.tracker) st.tracker.reset(s.mem());
   st.fog = new FogTracker(s.mem().r16(A.MapSize));
   st.fog.update(s.mem());
@@ -728,7 +736,7 @@ function audioEnv() {
   return { m: st.session.mem(), player, playing: st.playing, pview: pv, ownUi: pv || player >= 0,
     view: pv ? { x: st.pv.cam.x / 32, y: st.pv.cam.y / 32, w: MAP_RECT.w / 32, h: MAP_RECT.h / 32 }
       : { x: v.x / 32, y: v.y / 32, w: ui.view.width / v.scale / 32, h: ui.view.height / v.scale / 32 },
-    enabled: !st.busy && (st.speed === 1 || st.speed === 2) };
+    enabled: !st.busy && st.speed > 0 && st.speed <= 2 };
 }
 // The player view's UI emulation runs for every player all the time (its state must not depend on what was viewed).
 function pvHandle(ev) {
@@ -753,28 +761,89 @@ function stepTurn() {
   countKills(s, ev);
   audio.handle(ev, audioEnv());
   pvHandle(ev);
-  if (r >= 1 && r <= 3) setStatus(`Replay diverged at turn ${s.turn - 1} (status ${r}): the recording does not match this game data.`, true);
+  if (r >= 1 && r <= 3) {
+    if (s.fromDump) { console.warn('restored state dump diverged: dumps dropped'); st.dumps.clear(); }   // seekTo starts over
+    else setStatus(`Replay diverged at turn ${s.turn - 1} (status ${r}): the recording does not match this game data.`, true);
+  }
+  maybeDump(s);
   return !s.ended;
 }
 
 async function seekTo(turn, progress = null) {
   if (st.busy) return;
-  st.busy = true;
+  st.busy = true; st.busyT0 = performance.now(); document.body.classList.add('seeking');
   const wasPlaying = st.playing; setPlaying(false);
   try {
-    if (turn < st.session.turn) await boot();
+    st.seekGoal = { turn, from: st.session.turn };
+    // a dump at or before the target, past where we are (or anywhere before it when going back), saves the turns to it
+    const d = [...st.dumps.values()].filter(x => x.turn <= turn).sort((a, b) => b.turn - a.turn)[0];
+    if (d && (turn < st.session.turn || d.turn > st.session.turn)) await restoreDump(d);
+    else if (turn < st.session.turn) await boot();
+    st.seekGoal.from = st.session.turn;
     if (st.screen) st.screen = null;              // a seek hides the lobby / closes the outro (shown again at the end)
     st.outroClosed = false;
     if (turn === 0) { st.busy = false; maybeLobby(); return; }
-    const t0 = performance.now();
+    let t0 = performance.now();
     while (st.session.turn < turn && !st.session.ended) {
       for (let k = 0; k < 500 && st.session.turn < turn && stepTurn(); k++);
-      if (performance.now() - t0 > 30) { updateClock(); if (progress) progress(st.session.turn / turn); await new Promise(r => setTimeout(r, 0)); }
+      if (st.session.mismatch && st.session.fromDump) { await boot(); st.seekGoal.from = 0; continue; }   // a bad dump: from the start
+      if (performance.now() - t0 > 30) { updateClock(); if (progress) progress(st.session.turn / turn); await new Promise(r => setTimeout(r, 0)); t0 = performance.now(); }
     }
   } catch (e) { setStatus(e.message, true); }
-  st.busy = false;
+  finally { st.busy = false; st.seekGoal = null; document.body.classList.remove('seeking'); ui.busy.hidden = true; }
   if (wasPlaying) setPlaying(true);
 }
+
+// ---- state dumps: one per minute of game time, the last five kept, so seeking back (or forward past one) does not
+// replay the game from the start. A dump is the sim's changed memory pages (sim.js dump) plus what the viewer
+// accumulated from the turns: fog ever seen, the match tracker, kills, the player view's voice state and messages.
+function cloneDeep(o) {   // plain data, keeping class prototypes (UiVoices, LocalRng)
+  if (o === null || typeof o !== 'object') return o;
+  if (Array.isArray(o)) return o.map(cloneDeep);
+  if (ArrayBuffer.isView(o)) return o.slice();
+  if (o instanceof Map) return new Map([...o].map(([k, v]) => [k, cloneDeep(v)]));
+  if (o instanceof Set) return new Set(o);
+  const c = Object.create(Object.getPrototypeOf(o));
+  for (const k of Object.keys(o)) c[k] = cloneDeep(o[k]);
+  return c;
+}
+function viewerState() {
+  const t = st.tracker;
+  return { fog: st.fog.bits.slice(), tracker: t && t.left ? { left: new Map(t.left), elim: new Map(t.elim), types: [...t.types], res: [...t.res] } : null,
+    kills: { by: new Map(kills.by), razed: new Map(kills.razed) }, pvui: cloneDeep(st.pv.ui), msgs: st.pv.messages.slice() };
+}
+function maybeDump(s) {
+  if (!st.dumpBase || s.ended || s.mismatch) return;
+  const min = Math.floor(s.tick * st.tickMs / 60000);
+  if (min === st.dumpMin) return;
+  st.dumpMin = min;
+  if (min < 1 || st.dumps.has(min)) return;
+  const g = st.seekGoal;   // seeking: only the last five minutes before the target (earlier ones would be dropped anyway)
+  if (g && (tickAtTurn(g.turn) - s.tick) * st.tickMs > 5 * 60000) return;
+  if (kills.session !== s) countKills(s, []);
+  st.dumps.set(min, { min, turn: s.turn, sim: s.dump(st.dumpBase), view: viewerState() });
+  while (st.dumps.size > 5) st.dumps.delete(st.dumps.keys().next().value);   // the oldest made
+}
+async function restoreDump(d) {
+  await boot();
+  st.session.restore(d.sim);
+  const v = d.view, t = st.tracker;
+  st.fog.bits.set(v.fog);
+  if (t && v.tracker) Object.assign(t, { left: new Map(v.tracker.left), elim: new Map(v.tracker.elim), types: [...v.tracker.types], res: [...v.tracker.res] });
+  kills.session = st.session; kills.by = new Map(v.kills.by); kills.razed = new Map(v.kills.razed);
+  st.pv.ui = cloneDeep(v.pvui); st.pv.messages = v.msgs.slice();
+  st.dumpMin = d.min;
+}
+// game time <-> turns (seek bar = turns done): the replay's tick after each turn, else about 2 ticks a turn
+const tickAtTurn = n => n <= 0 ? 0 : st.turnTicks ? st.turnTicks[Math.min(n, st.turnTicks.length) - 1] : 2 * n;
+function turnAtTick(t) {   // the fewest turns that reach tick t
+  if (t <= 0) return 0;
+  const tt = st.turnTicks; if (!tt) return Math.round(t / 2);
+  let lo = 0, hi = tt.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (tt[mid] >= t) hi = mid; else lo = mid + 1; }
+  return lo + 1;
+}
+const clampTurn = n => Math.max(0, Math.min(st.totalTurns - 1, n));
 
 // ---------------------------------------------------------------- playback loop
 function setPlaying(on) { if (!on) st.pauseAtTick = null; st.playing = !!(on && st.session && !st.session.ended); ui.play.firstElementChild.firstElementChild.setAttribute('href', st.playing ? '#i-pause' : '#i-play'); ui.play.setAttribute('aria-label', st.playing ? 'Pause' : 'Play'); document.body.classList.toggle('playing', st.playing); st.budget = 0; wake(); }
@@ -787,19 +856,64 @@ function playPressed() {
 function stepPressed() { closeScreen(); setPlaying(false); stepTurn(); }
 ui.play.onclick = playPressed;
 ui.step.onclick = stepPressed;
-$('back10').onclick = () => skip10(-1);
-$('fwd10').onclick = () => skip10(1);
-// skip 10 s of game time (arrow keys and the -10s / +10s buttons)
-function skip10(dir) {
-  if (!st.session || st.busy || lobbyUp() && dir < 0) return;
-  const s = st.session, tpt = s.turn > 1 && s.tick > 0 ? s.tick / (s.turn - 1) : 1;   // average ticks per turn so far
-  const dturns = Math.max(1, Math.round(10000 / st.tickMs / tpt));
-  const target = Math.max(0, Math.min(st.totalTurns - 1, s.turn + dir * dturns));
+$('back10').onclick = () => skipBy(-10);
+$('fwd10').onclick = () => skipBy(10);
+$('back60').onclick = () => skipBy(-60);
+$('fwd60').onclick = () => skipBy(60);
+// skip secs of game time (arrow keys, Shift + arrows, the -10s / +10s / -1m / +1m buttons)
+function skipBy(secs) {
+  if (!st.session || st.busy || lobbyUp() && secs < 0) return;
+  const target = clampTurn(turnAtTick(st.session.tick + secs * 1000 / st.tickMs));
   ui.seek.value = target; seekTo(target);
 }
 ui.speed.onchange = () => { st.speed = +ui.speed.value; st.budget = 0; };
-ui.seek.oninput = () => { ui.clock.textContent = `seek to turn ${ui.seek.value}…`; };
-ui.seek.onchange = () => seekTo(+ui.seek.value);
+ui.seek.onchange = () => { seekTip.hidden = true; seekTo(+ui.seek.value); };
+// the game time at the thumb while dragging, at the pointer while hovering
+const seekTip = $('seekTip');
+function showSeekTip(turn) {
+  if (!st.session) return;
+  const r = ui.seek.getBoundingClientRect(), max = +ui.seek.max || 1, th = 14;
+  turn = Math.max(0, Math.min(max, turn));
+  seekTip.textContent = fmtTime(tickAtTurn(turn) * st.tickMs);
+  seekTip.style.left = `${th / 2 + (r.width - th) * turn / max}px`;
+  seekTip.hidden = false;
+}
+ui.seek.addEventListener('input', () => showSeekTip(+ui.seek.value));
+ui.seek.addEventListener('pointermove', e => {
+  if (e.buttons || e.pointerType === 'touch') return;
+  const r = ui.seek.getBoundingClientRect();
+  showSeekTip(Math.round((e.clientX - r.left - 7) / Math.max(1, r.width - 14) * (+ui.seek.max || 1)));
+});
+ui.seek.addEventListener('pointerleave', () => { seekTip.hidden = true; });
+ui.seek.addEventListener('pointerup', () => { seekTip.hidden = true; });
+// go to a time: click the clock (or G), type h:mm:ss / m:ss / minutes, Enter
+const timeIn = $('timeIn');
+function parseClock(v) {
+  v = v.trim();
+  if (/^\d+(\.\d+)?$/.test(v)) return +v * 60000;   // a bare number: minutes
+  if (!/^\d+(:\d{1,2}){1,2}(\.\d+)?$/.test(v)) return NaN;
+  return v.split(':').reduce((a, p) => a * 60 + +p, 0) * 1000;
+}
+function openTimeInput() {
+  if (!st.session || st.busy) return;
+  timeIn.value = fmtTime(st.session.tick * st.tickMs); timeIn.classList.remove('bad');
+  ui.clock.hidden = true; timeIn.hidden = false; timeIn.focus(); timeIn.select();
+}
+function closeTimeInput() { if (timeIn.hidden) return; timeIn.hidden = true; ui.clock.hidden = false; }
+ui.clock.onclick = openTimeInput;
+ui.clock.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); openTimeInput(); } };
+timeIn.oninput = () => timeIn.classList.remove('bad');
+timeIn.onblur = closeTimeInput;
+timeIn.onkeydown = e => {
+  if (e.key === 'Escape') { e.preventDefault(); closeTimeInput(); return; }
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const ms = parseClock(timeIn.value);
+  if (!Number.isFinite(ms)) { timeIn.classList.add('bad'); return; }
+  closeTimeInput();
+  const target = clampTurn(turnAtTick(ms / st.tickMs));
+  ui.seek.value = target; seekTo(target);
+};
 // the map's fog: the watched player's, unless F hid it
 const watched = () => +ui.fog.value;
 function applyFog() { st.renderer.fogPlayer = st.noFog ? -1 : watched(); updateWatchButtons(); }
@@ -896,6 +1010,7 @@ window.addEventListener('keydown', e => {
   else if (!e.ctrlKey && !e.metaKey && !e.altKey && HUD_KEYS[e.key.toLowerCase()]) HUD_KEYS[e.key.toLowerCase()]();
   else if (e.key === 'Escape' && st.inspect) { st.inspect = null; drawInspect(st.session.mem()); }
   else if (e.key === '.') stepPressed();
+  else if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); openTimeInput(); }
   else if ((e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.metaKey && !lobbyUp()) setPlayerView(!st.pv.on);
   else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFog();
   else if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFollow();
@@ -910,7 +1025,7 @@ window.addEventListener('keydown', e => {
     ui.fog.value = '-1'; ui.fog.onchange();
   }
   else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !e.ctrlKey && !e.metaKey && !e.altKey) {   // skip 10 s
-    e.preventDefault(); skip10(e.key === 'ArrowLeft' ? -1 : 1);
+    e.preventDefault(); skipBy((e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 60 : 10));
   }
   else if (st.screen && st.screen.kind === 'outro' && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== 'Shift' && e.target.tagName !== 'SELECT') { e.preventDefault(); closeScreen(); }
 });
@@ -919,6 +1034,7 @@ function frame(t) {
   requestAnimationFrame(frame);
   if (!st.session || st.loading) return;
   document.body.classList.toggle('screenUp', !!st.screen);   // lobby / end screen: the floating panels step aside
+  if (st.busy) { st.lastT = 0; drawBusy(); return; }   // seeking: no map, a running indicator
   const dt = st.lastT ? Math.min(250, t - st.lastT) : 0; st.lastT = t;
   if (st.screen && st.screen.kind === 'intro') { st.budget = 0; }
   else if (st.playing && !st.busy) {
@@ -947,6 +1063,16 @@ function frame(t) {
   drawBalloons();
 }
 
+function drawBusy() {
+  if (performance.now() - st.busyT0 < 150) return;   // short skips: no flash
+  const el = ui.busy, s = st.session, g = st.seekGoal;
+  if (el.hidden) el.hidden = false;
+  const goal = g ? g.turn : s.turn, from = g ? g.from : 0, f = goal > from ? Math.max(0, Math.min(1, (s.turn - from) / (goal - from))) : 1;
+  const txt = `${fmtTime(s.tick * st.tickMs)} → ${fmtTime(tickAtTurn(goal) * st.tickMs)}`;
+  if (el._t !== txt) { el._t = txt; el.querySelector('span').textContent = txt; }
+  el.querySelector('b > i').style.width = `${(100 * f).toFixed(1)}%`;
+  updateClock();
+}
 function fmtTime(ms) { const s = Math.floor(ms / 1000); return `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor(s / 60) % 60).padStart(Math.floor(s / 3600) ? 2 : 1, '0')}:${String(s % 60).padStart(2, '0')}`; }
 function updateClock() {
   const s = st.session;
