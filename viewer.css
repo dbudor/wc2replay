@@ -204,6 +204,39 @@ body.noScore .score { display: none !important; }
 .toast { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none; padding: 8px 16px;
   border-radius: 999px; background: rgba(10, 12, 16, .85); border: 1px solid var(--edge); font-weight: 600; box-shadow: 0 4px 14px #0007; }
 
+/* ---- commentary balloons (balloons.js): comic-book speech over the units; the tail's tip is on the speaker */
+.balloons { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.balloon { position: absolute; width: max-content; max-width: 240px; padding: 7px 13px; background: #fff; color: #111;
+  border: 2.5px solid #111; border-radius: 20px / 17px; box-shadow: 3px 4px 0 rgba(0, 0, 0, .35); white-space: pre-line;
+  font: 700 15px/1.25 "Comic Neue", "Comic Sans MS", "Chalkboard SE", "Comic Sans", cursive; letter-spacing: .01em;
+  transform-origin: var(--tx, 20px) 100%; animation: balloonPop .18s ease-out; }
+.balloon.below { transform-origin: var(--tx, 20px) 0; }
+@keyframes balloonPop { from { transform: scale(.5); opacity: 0; } }
+/* tail: a dark wedge with a white one inside it, over the border */
+.balloon::before, .balloon::after { content: ''; position: absolute; }
+.balloon::before { left: var(--tx, 20px); top: calc(100% - 1px); width: 18px; height: 17px; background: #111; clip-path: polygon(0 0, 100% 0, 30% 100%); }
+.balloon::after { left: calc(var(--tx, 20px) + 3.5px); top: calc(100% - 3px); width: 11px; height: 12px; background: #fff; clip-path: polygon(0 0, 100% 0, 30% 100%); }
+.balloon.below::before { top: auto; bottom: calc(100% - 1px); clip-path: polygon(30% 0, 100% 100%, 0 100%); }
+.balloon.below::after { top: auto; bottom: calc(100% - 3px); clip-path: polygon(30% 0, 100% 100%, 0 100%); }
+/* thought: a rounder cloud with bubbles for a tail */
+.balloon.think { border-radius: 50% / 50%; padding: 10px 18px; font-style: italic; font-weight: 600; }
+.balloon.think::before, .balloon.think::after { clip-path: none; background: #fff; border: 2.5px solid #111; border-radius: 50%; }
+.balloon.think::before { width: 12px; height: 10px; top: calc(100% + 1px); }
+.balloon.think::after { width: 7px; height: 6px; left: calc(var(--tx, 20px) - 4px); top: calc(100% + 13px); }
+.balloon.think.below::before { top: auto; bottom: calc(100% + 1px); }
+.balloon.think.below::after { top: auto; bottom: calc(100% + 13px); }
+/* shout: loud, double-edged, a little tilted */
+.balloon.shout { text-transform: uppercase; font-size: 16px; font-weight: 800; border-width: 3px; border-radius: 8px; rotate: -1.5deg;
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5.5px #111, 4px 6px 0 3px rgba(0, 0, 0, .3); }
+/* the speaker is off screen: pinned to the edge, no tail */
+.balloon.edge { opacity: .85; }
+.balloon.edge::before, .balloon.edge::after { display: none; }
+/* the narrator: a caption box above the timeline */
+.balloon.caption { left: 50%; translate: -50% 0; bottom: calc(var(--hud-b, 80px) + 4px); max-width: min(520px, 70%); text-align: center;
+  background: #ffe27a; border-width: 2px; border-radius: 3px; padding: 6px 14px; font-weight: 700; transform-origin: 50% 100%; }
+.balloon.caption::before, .balloon.caption::after { display: none; }
+body.seek-show .balloon.caption { bottom: 12px; }   /* the map already ends above the timeline */
+
 /* ---- who is talking (over the map, under the score strip) */
 .talkers { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px;
   max-width: 60%; z-index: 2; pointer-events: none; }
@@ -290,6 +323,7 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
 
 /* ---- P: upright phone */
 @media (max-width: 760px) and (min-height: 501px) {
+  .balloon.caption { bottom: 12px; }
   #stage { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: 100svh; }
   body:has(#controls[hidden]) #bar { width: calc(100% - 24px); padding: 18px; }
   .score { position: relative; grid-row: 1; top: auto; left: auto !important; right: auto !important; width: auto; max-height: none; flex-direction: column;
@@ -320,6 +354,8 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
   .inspX { font-size: 22px; padding: 0 6px; }
   .talkers { top: 8px; max-width: 90%; }
   .toast { top: 30%; }
+  .balloon { font-size: 13px; max-width: 180px; padding: 5px 10px; }
+  .balloon.shout { font-size: 14px; }
 }
 
 /* ---- L: phone on its side (the floating layout, smaller) */

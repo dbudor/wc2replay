@@ -9,7 +9,7 @@
 //
 // Captures (.pcapng/.pcap of an IPX-over-UDP game, ipxwrapper): converted in the browser with the host's view
 // by default; "Save .w2r" downloads the result. The "View of" selector (re-convert against another machine's own
-// packets; the game is the same) is hidden unless the page has ?advanced.
+// packets; the game is the same) is hidden unless the page has #advanced (or ?advanced).
 //
 // ---- sprites.js integration contract ----
 //   import('./sprites.js') (optional; the viewer falls back to owner-coloured boxes when it is missing or throws)
@@ -77,7 +77,13 @@ import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, ou
 import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
 import { pickUnit, unitRef, refAlive, unitInfo } from './unitinfo.js';
+import { Balloons, parseBalloons, balloonStub } from './balloons.js';
 import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visibleMessages, FRAME_W, FRAME_H, MAP_RECT, MINI_RECT } from './playerview.js';
+
+// The page's parameters: after # (shared links; never sent to the server, and a new one in the same tab loads it), else
+// after ? (older links)
+const urlParams = new URLSearchParams(location.hash.length > 1 ? location.hash.slice(1) : location.search);
+window.addEventListener('hashchange', () => location.reload());
 
 
 const $ = id => document.getElementById(id);
@@ -95,7 +101,7 @@ const ui = { status: $('status'), controls: $('controls'), play: $('play'), step
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
   capture: null, captureName: '', converted: null,
-  camCapture: [], camFiles: [] };   // CamRec packets: from the capture, from dropped .w2c files   // capture: parseCapture result; converted: { peer, w2r, name }
+  camCapture: [], camFiles: [], balloons: null };   // CamRec packets: from the capture, from dropped .w2c files   // capture: parseCapture result; converted: { peer, w2r, name }
 const st = {
   module: null, mpq: null, files: null, session: null, tileset: null, renderer: null, sprites: null, fog: null,
   playing: false, speed: 1, totalTurns: 0, tickMs: 26.67, budget: 0, lastT: 0, busy: false, looping: false, datKey: null,
@@ -188,8 +194,9 @@ function cursorFor(p) {
 // ---------------------------------------------------------------- file picking
 async function addFiles(list) {
   await autoGame;                                  // game files found next to the page come first; picked ones override
-  let newCapture = null, onlyPlugin = false;
+  let newCapture = null, onlyPlugin = false, newGame = false, newBalloons = null;
   const onlyCam = list.length > 0 && list.every(f => /\.w2c$/i.test(f.name));
+  const onlyJson = list.length > 0 && list.every(f => /\.json$/i.test(f.name));
   for (const f of list) {
     const n = f.name.toLowerCase();
     const buf = () => f.arrayBuffer().then(b => new Uint8Array(b));
@@ -198,20 +205,31 @@ async function addFiles(list) {
       if (isW2c(b)) picked.camFiles.push(b); else setStatus(`${f.name}: not a CamRec .w2c file`, true);
       continue;
     }
+    if (n.endsWith('.json')) {                     // commentary balloons (balloons.js)
+      try { newBalloons = parseBalloons(JSON.parse(new TextDecoder().decode(await buf()))); }
+      catch (e) { setStatus(`${f.name}: ${e.message}`, true); }
+      continue;
+    }
     if (!n.endsWith('.w2p')) onlyPlugin = false;
     if (n.endsWith('.exe')) picked.exe = await buf();
     else if (n === 'war2dat.mpq') picked.dat = await buf();
     else if (n === 'war2patch.mpq') picked.patch = await buf();
-    else if (/\.w2r(\.gz)?$/.test(n)) { picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.listName = f.listName || null; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
+    else if (/\.w2r(\.gz)?$/.test(n)) { picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.listName = f.listName || null; newGame = true; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
     else if (n.endsWith('.pud')) picked.puds.set(n, await buf());
     else if (n.endsWith('.w2p')) { setPlugin(pluginInfo(await buf(), f.name)); onlyPlugin = true; continue; }
     else if (/\.(pcapng|pcap|cap)$/.test(n)) {
       const b = await buf();
       try { newCapture = parseCapture(b); } catch (e) { reportError(e, f.name); return; }
-      picked.camCapture = camPacketsFromCapture(b);
+      picked.camCapture = camPacketsFromCapture(b); newGame = true;
       picked.capture = newCapture; picked.captureName = f.name; picked.listName = f.listName || null; picked.converted = null; picked.replay = null;
     }
     else if (n.endsWith('.mpq') && !picked.dat) picked.dat = await buf();
+  }
+  if (newGame || newBalloons) picked.balloons = newBalloons;   // a new game drops the last one's balloons
+  if (onlyJson) {
+    if (!newBalloons) return;
+    if (!st.session) { setStatus(`${newBalloons.length} balloon(s) loaded; now pick the replay or capture.`); return; }
+    balloons.set(newBalloons); toast(`${newBalloons.length} balloon${newBalloons.length === 1 ? '' : 's'} loaded`); return;
   }
   if (onlyCam) {
     if (!st.session) { setStatus(`${picked.camFiles.length} camera file(s) loaded; now pick the replay or capture.`); return; }
@@ -225,7 +243,7 @@ async function addFiles(list) {
     return;
   }
   if (newCapture) fillPeers(newCapture);
-  ui.peerBox.hidden = !picked.capture || !new URLSearchParams(location.search).has('advanced');
+  ui.peerBox.hidden = !picked.capture || !urlParams.has('advanced');
   const missing = [!picked.exe && 'Warcraft II BNE.exe', !picked.dat && 'War2Dat.mpq', !picked.replay && !picked.capture && 'a .w2r replay or a capture'].filter(Boolean);
   if (missing.length) { setStatus(`Still needed: ${missing.join(', ')}.`); return; }
   try {
@@ -293,7 +311,7 @@ window.addEventListener('dragover', e => { e.preventDefault(); ui.drop.hidden = 
 window.addEventListener('dragleave', e => { if (e.target === ui.drop || !e.relatedTarget) ui.drop.hidden = true; });
 window.addEventListener('drop', e => { e.preventDefault(); ui.drop.hidden = true; addFiles([...e.dataTransfer.files]); });
 
-// Dev convenience: ?load=url1,url2,... fetches files from the same origin (e.g. when the server's root also
+// Dev convenience: #load=url1,url2,... (or ?load=) fetches files from the same origin (e.g. when the server's root also
 // holds the game directory) and feeds them through the same path as picked files. Nothing is uploaded.
 // Game files next to the page: if the server has Warcraft II BNE.exe and War2Dat.mpq (+ War2Patch.mpq) in the
 // viewer's directory or its game/ subdirectory (tools/dist/serve.py serves the user's War2 folder there), they
@@ -312,7 +330,7 @@ async function findGameFile(dir, names) {
   return null;
 }
 const autoGame = (async () => {
-  if (!/^https?:$/.test(location.protocol) || new URLSearchParams(location.search).get('noauto')) return;
+  if (!/^https?:$/.test(location.protocol) || urlParams.get('noauto')) return;
   for (const dir of ['./', './game/']) {
     const exe = await findGameFile(dir, GAME_NAMES.exe); if (!exe) continue;
     const dat = await findGameFile(dir, GAME_NAMES.dat); if (!dat) continue;
@@ -333,7 +351,7 @@ const autoGame = (async () => {
   }
 })();
 
-const loadList = new URLSearchParams(location.search).get('load');
+const loadList = urlParams.get('load');
 if (loadList) (async () => {
   const fl = [];
   for (const u of loadList.split(',')) {
@@ -412,6 +430,10 @@ async function loadFromList(name) {
   const base = s => s.replace(/^.*[\\/]/, '').toLowerCase();
   const pud = map && !picked.puds.has(base(map)) && replayIndex.find(e => /\.pud$/i.test(e.name) && base(e.name) === base(map));
   if (pud) fl.unshift(file(pud.name, await get(pud.name)));
+  {   // commentary: replays/<name>.balloons.json, when there is one
+    const bn = name.replace(/\.(w2r(\.gz)?|pcapng|pcap|cap)$/i, '') + '.balloons.json';
+    try { const r = await fetch(url(bn), { cache: 'no-store' }); if (r.ok) fl.push(file(bn, new Uint8Array(await r.arrayBuffer()))); } catch { /* none */ }
+  }
   await addFiles(fl);
 }
 ui.replayList.onchange = async () => {
@@ -487,6 +509,7 @@ async function startSession(intro) {
   ui.fog.length = 1;
   for (const p of readPlayers(m)) ui.fog.add(new Option(`as player ${p.id + 1}${p.name ? ` (${p.name})` : ''}${p.id === m.r8(A.LocalPlayer) ? ' · recorder' : ''}`, p.id));
   applyFog(); mic.picked.clear();   // a new replay: fog "all", no microphones picked
+  balloons.set(picked.balloons);
   ui.seek.max = Math.max(1, st.totalTurns - 1);
   ui.controls.hidden = false;
   const mapKey = `${st.match ? st.match.mapName : ''}|${m.r16(A.MapSize)}|${m.r8(A.Tileset)}`;
@@ -507,10 +530,10 @@ async function startSession(intro) {
   ui.shareBox.hidden = !picked.listName;
   await applyUrlState();
 }
-// ---- shared links (Share button): ?replay=<name in replays/>&turn=&x=&y=&zoom=&fog=&nofog=1&follow=1&pview=1&mics=&micfollow=0
-// (also the dev params turn / fog / pview / play with ?load=). Applied once, to the first replay that loads (and, with
+// ---- shared links (Share button): #replay=<name in replays/>&turn=&x=&y=&zoom=&fog=&nofog=1&follow=1&pview=1&mics=&micfollow=0
+// (also the dev params turn / fog / pview / play with #load= / ?load=). Applied once, to the first replay that loads (and, with
 // replay=, only when it is that one), so picking another replay afterwards starts normally.
-let urlState = new URLSearchParams(location.search);
+let urlState = new URLSearchParams(urlParams);
 async function applyUrlState() {
   const q = urlState; if (!q) return;
   if (q.get('replay') && q.get('replay') !== picked.listName) return;
@@ -563,7 +586,7 @@ function shareUrl() {
   q.set('pause', String(Math.max(0, Math.round(+ui.pauseAfter.value || 0))));
   const rules = picked.converted ? picked.converted.rules : st.session.rules;
   if (rules != null) q.set('rules', String(rules));
-  return `${location.origin}${location.pathname}?${q}`;
+  return `${location.origin}${location.pathname}#${q}`;
 }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch { /* insecure context or denied: the old way */ }
@@ -603,9 +626,9 @@ function closeScreen() {
   st.screen = null;
 }
 const lobbyUp = () => !!(st.screen && st.screen.kind === 'intro');
-// the lobby is up exactly while the timeline is at turn 0 (dev: ?nointro=1 never shows it)
+// the lobby is up exactly while the timeline is at turn 0 (dev: #nointro=1 never shows it)
 function maybeLobby() {
-  if (st.session && st.session.turn === 0 && st.lobby && !st.screen && !new URLSearchParams(location.search).get('nointro')) showScreen('intro');
+  if (st.session && st.session.turn === 0 && st.lobby && !st.screen && !urlParams.get('nointro')) showScreen('intro');
 }
 function startFromLobby() { closeScreen(); setPlaying(true); }
 // the player the end screen is about: the fog-of-war player, else the recording player
@@ -617,7 +640,7 @@ function outroInfo() {
   return outroData(st.art, m, st.match, v, tr.players, tr.left, tr.elim, st.tickMs);
 }
 function updateScreen() {
-  const sc = st.screen, now = performance.now(), t = new URLSearchParams(location.search).get('noanim') ? 99 : (now - sc.t0) / 1000;
+  const sc = st.screen, now = performance.now(), t = urlParams.get('noanim') ? 99 : (now - sc.t0) / 1000;
   let surf = null, key;
   if (sc.kind === 'intro') {
     key = 'i';
@@ -921,6 +944,7 @@ function frame(t) {
   mic.frame({ t: camTime(), active: st.playing && st.speed === 1 && !st.busy && !st.screen });
   drawTalkers();
   draw();
+  drawBalloons();
 }
 
 function fmtTime(ms) { const s = Math.floor(ms / 1000); return `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ':' : ''}${String(Math.floor(s / 60) % 60).padStart(Math.floor(s / 3600) ? 2 : 1, '0')}:${String(s % 60).padStart(2, '0')}`; }
@@ -1369,6 +1393,7 @@ const HUD_KEYS = {
   s: () => { const on = document.body.classList.contains('noScore'); setScoreShown(on); toast(on ? 'Score strip shown' : 'Score strip hidden'); },
   y: () => { const on = document.body.classList.contains('sideMin'); setSideMin(!on); toast(on ? 'Players panel shown' : 'Players panel hidden'); },
   x: () => fullBtn.click(),
+  b: () => copyBalloonStub(),
   m: () => {
     hudSide = { auto: 'left', left: 'right', right: 'auto' }[hudSide];
     try { localStorage.setItem('w2v.side', hudSide); } catch { /* private window */ }
@@ -1400,6 +1425,40 @@ ui.players.addEventListener('click', e => {
   }
   mic.toggle(+b.dataset.mic); if (st.session) drawPlayers(st.session.mem());
 });
+// ---- commentary balloons (balloons.js) over the map, in the free view and in the player view's map pane
+ui.balloons = $('balloons');
+const balloons = new Balloons(ui.balloons);
+function drawBalloons() {
+  const s = st.session, d = window.devicePixelRatio || 1;
+  // pinned balloons stay above the timeline when it floats over the map, and above the narrator's caption
+  const wr = ui.wrap.getBoundingClientRect(), cr = ui.controls.hidden ? null : ui.controls.getBoundingClientRect();
+  let bot = cr && cr.height && cr.top < wr.bottom ? cr.top - wr.top - 6 : wr.height;
+  const cap = ui.balloons.querySelector('.caption'); if (cap) bot = Math.min(bot, cap.getBoundingClientRect().top - wr.top - 6);
+  let project = null;
+  if (st.pv.on && st.pv.frame) {
+    const r = st.pv.rect, v = st.pv.lastView;
+    if (r && v) {
+      const L = (r.x + MAP_RECT.x * r.k) / d, T = (r.y + MAP_RECT.y * r.k) / d, k = r.k / d;
+      const clip = { l: L, t: T, r: L + MAP_RECT.w * k, b: Math.min(bot, T + MAP_RECT.h * k) };
+      project = (x, y) => ({ x: L + (x - v.x) * k, y: T + (y - v.y) * k, clip });
+    }
+  } else {
+    const v = st.view, k = v.scale / d, clip = { l: 0, t: 0, r: wr.width, b: bot };
+    project = (x, y) => ({ x: (x - v.x) * k, y: (y - v.y) * k, clip });
+  }
+  balloons.update(s.mem(), s.tick, st.tickMs, project, !!st.screen || !project);
+}
+// B: an entry for the balloons file, for the inspected unit (else the view's centre), now, into the clipboard
+async function copyBalloonStub() {
+  if (!st.session) return;
+  const m = st.session.mem(), iu = st.inspect && refAlive(m, st.inspect) !== 'gone' ? st.inspect.addr : 0;
+  let at;
+  if (iu) at = { unit: (iu - m.r32(A.Units)) / 0x98 };
+  else if (st.pv.on && st.pv.lastView) at = { x: st.pv.lastView.x + MAP_RECT.w / 2, y: st.pv.lastView.y + MAP_RECT.h / 2 };
+  else at = viewCentre();
+  const t = balloonStub({ tickMs: st.tickMs, tick: st.session.tick, ...at });
+  toast(await copyText(t) ? `Balloon copied: ${iu ? `unit ${at.unit}` : 'map point'}` : t);
+}
 // who is talking (over the map, both views): names in their colours
 function drawTalkers() {
   const el = ui.talkers, ps = st.session ? [...mic.talking].sort((a, b) => a - b) : [];

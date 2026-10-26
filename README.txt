@@ -52,7 +52,8 @@ the minimap, fog of war as any player.
 Keys: Space play/pause, . step one turn, Left/Right skip 10 s back/forward, 1-8 view as player 1-8,
 9 no fog, P toggle player view (that player's fog, selection, camera, UI and voices). With a player picked:
 F fog on/off (the view stays on that player), L follow that player's camera on/off (its recorded screen, else its
-selection; dragging the map or the minimap stops it). H toggle HP bars, Esc close the unit card.
+selection; dragging the map or the minimap stops it). H toggle HP bars, Esc close the unit card, B copy a
+commentary balloon entry (below).
 Click a unit or building on the map (free or player view) for its stats, as the game's status panel has them, for
 any player: armor, damage, range, sight with upgrade bonuses, speed, magic, current order, a worker's load, a
 transport's cargo, spell timers; construction and training / research progress with the time left; gold or oil
@@ -143,6 +144,31 @@ Supported
   built-in and custom maps, players quitting or dropping mid-game, saves/restarts during the game.
 * Not supported: Battle.net games (a different network protocol), modem/serial games (untested), starting an
   IPX game from a saved game.
+
+Commentary balloons
+-------------------
+Comic-book speech balloons over the units, read from a JSON file: replays/<replay name>.balloons.json next to a
+listed replay (e.g. 2026-10-23-game3.balloons.json for 2026-10-23-game3.w2r.gz) is loaded with it; or pick / drop a
+.json file together with (or after) the replay. The file is a list (or { "balloons": [...] }):
+
+  [
+    { "time": "0:01", "text": "Four against four. Who builds faster?", "secs": 6 },
+    { "time": "2:39", "unit": 1565, "text": "Right, lads, to the mine!" },
+    { "time": "3:10", "unit": 1565, "text": "Zug zug!", "kind": "shout" },
+    { "time": "4:00", "x": 1500, "y": 1500, "text": "Somewhere out here is the gold.", "kind": "think" }
+  ]
+
+  time   game clock when it appears, as the viewer shows it ("2:39", "1:02:05", "2:39.5", or seconds)
+  text   what is said
+  unit   the unit that says it; the balloon follows the unit (and stays where it was if the unit dies)
+  x, y   instead of unit: a point on the map, in map pixels (32 per tile)
+         with neither, it is the narrator: a caption box above the timeline
+  secs   how long it stays, in game seconds (default: by the text's length, at least 3)
+  kind   say (default), think or shout
+
+To write one: click the unit and press B. An entry for that unit at the current time goes to the clipboard
+(with no unit clicked, for the map point at the centre of the view); fill in its text. A balloon whose speaker is
+off screen is pinned to the edge of the view, without its tail.
 
 Credits / legal
 ---------------

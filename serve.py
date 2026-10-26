@@ -5,14 +5,15 @@
 # server maps (read-only, those three files and plugin/peon2k.w2p only) to the War2 folder: --game DIR, else $WAR2_DIR, else the folder
 # this script is in (viewer unzipped inside the War2 folder), else its game/ subfolder, else its parent, else common install paths.
 # The page's "Replays" list is /replays/index.json, made here from the replays folder: --replays DIR, else $WAR2_REPLAYS,
-# else the viewer's replays/ folder. Only its replays, captures, .w2c camera files and .pud maps are served (subfolders
-# two deep), read-only.
+# else the viewer's replays/ folder. Only its replays, captures, .w2c camera files, .pud maps and .balloons.json commentary
+# are served (subfolders two deep), read-only.
 import http.server, json, os, socketserver, sys, threading, urllib.parse, webbrowser
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GAME_FILES = ('warcraft ii bne.exe', 'war2dat.mpq', 'war2patch.mpq')
 PLUGIN_FILES = ('peon2k.w2p', 'peon2kvision.w2p')
 REPLAY_EXT = ('.w2r', '.w2r.gz', '.pcapng', '.pcap', '.cap', '.w2c', '.pud')
+SERVE_EXT = REPLAY_EXT + ('.balloons.json',)   # served, not listed
 
 def list_replays(root, depth=2):
     """[{name: path under root with '/', size, mtime}] of the replay-type files in root (subfolders `depth` deep)."""
@@ -32,7 +33,7 @@ def list_replays(root, depth=2):
 
 def replay_path(root, rel):
     """Real path of replays/<rel> if it is a listed file under root, else None."""
-    if not root or not rel.lower().endswith(REPLAY_EXT): return None
+    if not root or not rel.lower().endswith(SERVE_EXT): return None
     parts = rel.split('/')
     if len(parts) > 3 or any(not x or x.startswith('.') for x in parts): return None
     p = os.path.realpath(os.path.join(root, *parts)); r = os.path.realpath(root)
