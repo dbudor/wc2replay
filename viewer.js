@@ -32,7 +32,8 @@
 // When the replay ends, the end screen of MsnStats_Run (win/lose art per race, outcome, rank, score and the
 // units/buildings/gold/lumber/oil/kills/razings table) is shown for the SELECTED PLAYER: the "Fog of war"
 // player, or the recording player (the "View of" peer) when fog is "all". Changing that selector while it is
-// up re-draws it; a click or key closes it (it shows again when the end is reached again).
+// up re-draws it; a click or key closes it (it shows again when the end is reached again). Its "Stats" button (the
+// viewer's own, by "Continue") closes it and opens the match stats window.
 //
 // ---- player view (playerview.js) ----
 // "Player view" (checkbox next to the Fog-of-war selector, key P) shows the replay as the fog-of-war player saw it:
@@ -73,10 +74,11 @@ import { loadTileset } from './tileset.js';
 import { MapRenderer, FogTracker } from './render.js';
 import { readUnits, readPlayers, tickMs, A } from './gamestate.js';
 import { GameAudio, ALT_SOUND, HK } from './audio.js';
-import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outcome, playerStats, GameTracker, OUTCOME_TEXT } from './screens.js';
-import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
+import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outroStatsButton, outcome, playerStats, GameTracker, OUTCOME_TEXT, Surface } from './screens.js';
+import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
-import { pickUnit, unitRef, refAlive, unitInfo } from './unitinfo.js';
+import { pickUnit, unitRef, refAlive, unitInfo, typeName, UPGRADE_NAMES } from './unitinfo.js';
+import { MatchStats, unitsHtml, killsHtml, stackChartSvg, smoothRate, minuteTotals, cost as unitCost, points as unitPoints, upgradeCost, isBuilding, fmtNum, UPGRADE_ICON } from './stats.js';
 import { Balloons, parseBalloons, balloonStub } from './balloons.js';
 import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visibleMessages, FRAME_W, FRAME_H, MAP_RECT, MINI_RECT } from './playerview.js';
 
@@ -96,7 +98,7 @@ const ui = { status: $('status'), controls: $('controls'), play: $('play'), step
   drop: $('drop'), wrap: $('viewWrap'), busy: $('busy'),
   peerBox: $('peerBox'), peer: $('peer'), save: $('save'), share: $('share'), shareBox: $('shareBox'), pauseAfter: $('pauseAfter'), rules: $('rules'),
   pview: $('pview'), follow: $('follow'), fogBtn: $('fogBtn'), micLink: $('micLink'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
-  camShow: $('camShow'), camBox: $('camBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect'),
+  camShow: $('camShow'), camBox: $('camBox'), inputShow: $('inputShow'), inputBox: $('inputBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect'),
   score: $('score'), bar: $('bar'), side: $('side'), sideOpen: $('sideOpen'), toast: $('toast') };
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
@@ -116,7 +118,7 @@ const st = {
   cam: { tracks: new Map(), curBytes: [], cursors: [] },   // recorded cameras by player; Art\h_arrow.cur / o_arrow.cur
   stepClock: null,       // { from: g_TickCount before the last step, t } while playing (smooth camera time)
   turnTicks: null,       // the replay's game tick after each turn (time <-> turn), null when not stamped
-  dumps: new Map(),      // minute -> state dump (seek cache: the last five made); dumpBase: page hashes of a fresh boot
+  dumps: new Map(),      // minute -> state dump (seek cache: every 5th minute, and the last five others made); dumpBase: page hashes of a fresh boot
   dumpBase: null, dumpMin: 0,
   seekGoal: null,        // { turn, from } while seeking; busyT0: when it started
   busyT0: 0,
@@ -170,6 +172,7 @@ function refreshCams() {
   for (const [p, tr] of st.cam.tracks) if (M && tr.start && tr.start.mapSize !== M) { st.cam.tracks.delete(p); st.cam.ignored.push(p); }   // another game's file
   if (picked.converted) picked.converted.w2r = withCamChunk(picked.converted.w2r, pk);   // Save .w2r keeps them
   ui.camBox.hidden = !st.cam.tracks.size;
+  ui.inputBox.hidden = ![...st.cam.tracks.values()].some(t => t.input);
   st.mic = buildMicTracks(pk, st.cam.tracks);
   mic.setTracks(st.mic, st.tickMs || 1000 / 30);
   ui.micsBox.hidden = !mic.players.length;
@@ -487,6 +490,7 @@ async function startSession(intro) {
   st.match = parseMatch(picked.replay);
   st.tracker = new GameTracker(picked.replay);
   st.screen = null; st.outroClosed = false;
+  mstats.reset(); sw.icons.clear(); sw.key = '';   // a new replay (or rules): the match stats start over
   await boot();
   const m = st.session.mem();
   st.tileset = loadTileset(n => st.mpq.read(n), m);
@@ -511,6 +515,7 @@ async function startSession(intro) {
   ui.pview.disabled = !st.pv.frame;
   ui.pview.parentElement.title = st.pv.frame ? ui.pview.parentElement.title : 'Player view needs the in-game interface art (Art\\h_top.bmp ...) from War2Dat.mpq';
   st.pv.names = []; for (const p of readPlayers(m)) st.pv.names[p.id] = p.name || `Player ${p.id + 1}`;
+  st.startPlayers = readPlayers(m);   // the match stats' players and teams (players who leave drop out of readPlayers)
   refreshCams();
   ui.fog.length = 1;
   for (const p of readPlayers(m)) ui.fog.add(new Option(`as player ${p.id + 1}${p.name ? ` (${p.name})` : ''}${p.id === m.r8(A.LocalPlayer) ? ' · recorder' : ''}`, p.id));
@@ -655,7 +660,7 @@ function updateScreen() {
     const O = outroInfo();
     key = `o${O.v}:${Math.min(2, t).toFixed(2)}`;
     if (key !== sc.key && st.art.outroOk)
-      surf = renderOutro(st.art, O, t, `Showing ${O.name} - pick another player with "Fog of war"`);
+      surf = renderOutro(st.art, O, t, `${O.name}: pick another with "Fog of war"`);
     if (key !== sc.key) sc.info = O;
   }
   if (key !== sc.key) {
@@ -759,6 +764,7 @@ function stepTurn() {
   if (s.ended && st.cam.tracks.size) st.tracker.afterEnd(s.tick, new Map([...st.cam.tracks].map(([p, tr]) => [p, tr.endTick])));
   const ev = s.drainHooks();
   countKills(s, ev);
+  mstats.turn(s.mem(), s.turn - 1, s.tick, ev, st.tickMs);
   audio.handle(ev, audioEnv());
   pvHandle(ev);
   if (r >= 1 && r <= 3) {
@@ -794,8 +800,8 @@ async function seekTo(turn, progress = null) {
   if (wasPlaying) setPlaying(true);
 }
 
-// ---- state dumps: one per minute of game time, the last five kept, so seeking back (or forward past one) does not
-// replay the game from the start. A dump is the sim's changed memory pages (sim.js dump) plus what the viewer
+// ---- state dumps: one per minute of game time, so seeking back (or forward past one) does not replay the game from
+// the start: every 5th minute's kept (for the replay; a few MB each), of the others the last five made. A dump is the sim's changed memory pages (sim.js dump) plus what the viewer
 // accumulated from the turns: fog ever seen, the match tracker, kills, the player view's voice state and messages.
 function cloneDeep(o) {   // plain data, keeping class prototypes (UiVoices, LocalRng)
   if (o === null || typeof o !== 'object') return o;
@@ -818,11 +824,12 @@ function maybeDump(s) {
   if (min === st.dumpMin) return;
   st.dumpMin = min;
   if (min < 1 || st.dumps.has(min)) return;
-  const g = st.seekGoal;   // seeking: only the last five minutes before the target (earlier ones would be dropped anyway)
-  if (g && (tickAtTurn(g.turn) - s.tick) * st.tickMs > 5 * 60000) return;
+  const keep = min % 5 === 0, g = st.seekGoal;   // seeking: of the others only the last five minutes before the target
+  if (!keep && g && (tickAtTurn(g.turn) - s.tick) * st.tickMs > 5 * 60000) return;
   if (kills.session !== s) countKills(s, []);
   st.dumps.set(min, { min, turn: s.turn, sim: s.dump(st.dumpBase), view: viewerState() });
-  while (st.dumps.size > 5) st.dumps.delete(st.dumps.keys().next().value);   // the oldest made
+  const others = [...st.dumps.keys()].filter(k => k % 5);   // in the order made
+  for (const k of others.slice(0, Math.max(0, others.length - 5))) st.dumps.delete(k);
 }
 async function restoreDump(d) {
   await boot();
@@ -1008,6 +1015,7 @@ window.addEventListener('keydown', e => {
   if (!st.session || e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
   if (e.key === ' ') { e.preventDefault(); playPressed(); }
   else if (!e.ctrlKey && !e.metaKey && !e.altKey && HUD_KEYS[e.key.toLowerCase()]) HUD_KEYS[e.key.toLowerCase()]();
+  else if (e.key === 'Escape' && !sw.el.hidden) setStats(false);
   else if (e.key === 'Escape' && st.inspect) { st.inspect = null; drawInspect(st.session.mem()); }
   else if (e.key === '.') stepPressed();
   else if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); openTimeInput(); }
@@ -1016,6 +1024,7 @@ window.addEventListener('keydown', e => {
   else if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFollow();
   else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) { ui.hp.checked = !ui.hp.checked; ui.hp.onchange(); }
   else if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey && st.cam.tracks.size) { ui.camShow.checked = !ui.camShow.checked; ui.camShow.onchange(); }
+  else if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !ui.inputBox.hidden) { ui.inputShow.checked = !ui.inputShow.checked; toast(ui.inputShow.checked ? 'Input shown (player view)' : 'Input hidden'); }
   else if (e.key >= '1' && e.key <= '8' && !e.ctrlKey && !e.metaKey && !e.altKey) {   // view player 1..8 (if in the game)
     const v = String(+e.key - 1);
     if ([...ui.fog.options].some(o => o.value === v)) { ui.fog.value = v; ui.fog.onchange(); }
@@ -1035,6 +1044,7 @@ function frame(t) {
   if (!st.session || st.loading) return;
   document.body.classList.toggle('screenUp', !!st.screen);   // lobby / end screen: the floating panels step aside
   if (st.busy) { st.lastT = 0; drawBusy(); return; }   // seeking: no map, a running indicator
+  if (!sw.el.hidden && t - sw.last > 500) { sw.last = t; drawStats(); }
   const dt = st.lastT ? Math.min(250, t - st.lastT) : 0; st.lastT = t;
   if (st.screen && st.screen.kind === 'intro') { st.budget = 0; }
   else if (st.playing && !st.busy) {
@@ -1134,7 +1144,14 @@ ui.view.addEventListener('pointerdown', e => {
     }
     return;
   }
-  if (st.screen) { closeScreen(); return; }
+  if (st.screen) {   // the end screen: its "Stats" button opens the stats window, any other click closes it
+    const r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1, q = st.screen.rect, b = st.screen.info && st.art.outroOk && outroStatsButton(st.art, st.screen.info);
+    const x = q && ((e.clientX - r.left) * d - q.x) / q.k, y = q && ((e.clientY - r.top) * d - q.y) / q.k;
+    const stats = b && q && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h;
+    closeScreen();
+    if (stats) setStats(true);
+    return;
+  }
   if (st.pv.on) { pvPointerDown(e); return; }
   drag = { x: e.clientX, y: e.clientY, vx: st.view.x, vy: st.view.y, moved: false }; ui.view.setPointerCapture(e.pointerId); ui.view.classList.add('drag'); });
 // player view: frame coordinates of a pointer event (the 640x480 screen is scaled into the canvas)
@@ -1218,10 +1235,11 @@ function drawPlayerView(ctx, W, H, m) {
   if (rec) {   // the player's own viewport (tiles), as recorded
     const c = st.pv.cam; c.x = rec.vx * 32; c.y = rec.vy * 32; c.clamp(m); view = { x: Math.round(c.x), y: Math.round(c.y) };
   }
+  const inp = rec && ui.inputShow.checked ? inputAt(tr, camTime(), st.tickMs, KEYS_MS / st.tickMs) : null;
   const ticks = st.pv.lastTick < 0 || s.tick < st.pv.lastTick || s.tick - st.pv.lastTick > 400 ? -1 : s.tick - st.pv.lastTick;
   st.pv.lastTick = s.tick; st.pv.lastView = view;
   const c = st.pv.frame.render({ m, p, renderer: st.renderer, fog: st.fog, noFog: st.noFog, view, selection: sel, counterFrames: ticks,
-    messages: visibleMessages(st.pv.messages, p, s.tick, st.tickMs) });
+    messages: visibleMessages(st.pv.messages, p, s.tick, st.tickMs), press: inp && inp.left && !inp.drag ? { x: rec.mx, y: rec.my } : null });
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
   let k = Math.min(W / FRAME_W, H / FRAME_H);
   if (k >= 1) k = Math.max(1, Math.floor(k * 4) / 4);   // crisp: quarter steps when scaling up
@@ -1235,6 +1253,7 @@ function drawPlayerView(ctx, W, H, m) {
     inspectBox(ctx, m, iu, view.x - MAP_RECT.x, view.y - MAP_RECT.y, k, x, y);
     ctx.restore();
   }
+  if (inp) drawInput(ctx, W, H, tr, inp, rec, view, x, y, k);
   const cur = rec && cursorFor(p);
   if (cur) {   // the game's cursor at the recorded mouse point (clipped to the 640x480 screen)
     ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
@@ -1242,6 +1261,86 @@ function drawPlayerView(ctx, W, H, m) {
     ctx.restore();
   }
   if (ui.follow.classList.contains('on') !== pvFollowing()) updateWatchButtons();
+}
+// Player view, recorded input (CamRec input packets): the drag box as the game draws it (palette 0xfa, 1 px, from where
+// it started to the mouse, on the map pane), a fading ring where a button went down (left / right; on the map it stays
+// on the ground the view showed then), and a strip of the mouse buttons, the modifiers held, the keys just pressed
+// and actions per minute.
+const KEYS_MS = 2500, CLICK_MS = 450;
+function drawInput(ctx, W, H, tr, inp, rec, view, x, y, k) {
+  const px = (gx, gy) => [x + gx * k, y + gy * k], R = MAP_RECT;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x + R.x * k, y + R.y * k, R.w * k, R.h * k); ctx.clip();
+  if (inp.drag) {
+    const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+    const mx = cl(rec.mx, R.x, R.x + R.w - 1), my = cl(rec.my, R.y, R.y + R.h - 1);
+    const x0 = Math.min(inp.drag.x, mx), y0 = Math.min(inp.drag.y, my), x1 = Math.max(inp.drag.x, mx), y1 = Math.max(inp.drag.y, my);
+    const [c0, c1, c2] = st.tileset.rgb[0xfa] || [0, 255, 0];
+    ctx.fillStyle = `rgb(${c0},${c1},${c2})`;
+    const [ax, ay] = px(x0, y0), bw = (x1 - x0 + 1) * k, bh = (y1 - y0 + 1) * k, t = Math.max(1, Math.round(k));
+    ctx.fillRect(ax, ay, bw, t); ctx.fillRect(ax, ay + bh - t, bw, t); ctx.fillRect(ax, ay, t, bh); ctx.fillRect(ax + bw - t, ay, t, bh);
+  }
+  ctx.restore();
+  const clickAge = CLICK_MS / st.tickMs;
+  for (const c of inp.clicks) {
+    if (c.age > clickAge) continue;
+    let sx = c.x, sy = c.y;
+    if (c.x >= R.x && c.x < R.x + R.w && c.y >= R.y && c.y < R.y + R.h) {   // on the map: keep it on the ground
+      const then = camAt(tr, c.t, st.tickMs);
+      if (then) { sx = then.vx * 32 + c.x - R.x - view.x + R.x; sy = then.vy * 32 + c.y - R.y - view.y + R.y; }
+      if (sx < R.x || sx >= R.x + R.w || sy < R.y || sy >= R.y + R.h) continue;
+    }
+    const f = c.age / clickAge, [cx, cy] = px(sx, sy);
+    ctx.save();
+    ctx.globalAlpha = 1 - f; ctx.lineWidth = Math.max(1.5, 1.5 * k);
+    ctx.strokeStyle = c.right ? '#ff6a4d' : '#ffe27a';
+    for (let r = 0; r < (c.double ? 2 : 1); r++) { ctx.beginPath(); ctx.arc(cx, cy, (3 + 11 * f + 5 * r) * k, 0, 2 * Math.PI); ctx.stroke(); }
+    ctx.restore();
+  }
+  // the strip: beside the game's screen, else in the map pane's top-right corner
+  const d = window.devicePixelRatio || 1, fs = Math.round(13 * d), ch = Math.round(22 * d), gap = Math.round(4 * d), fade = 500 / st.tickMs;
+  ctx.save();
+  ctx.font = `600 ${fs}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  const caps = [];
+  caps.push({ mouse: true });
+  for (const [bit, name] of [[2, 'Shift'], [4, 'Ctrl'], [8, 'Alt']]) if (inp.mods & bit) caps.push({ label: name, lit: true });
+  const keys = inp.keys.filter(q => q.vk < 0x10 || q.vk > 0x12).slice(-6);
+  for (const q of keys) caps.push({ label: q.label, alpha: q.age > KEYS_MS / st.tickMs - fade ? Math.max(0, (KEYS_MS / st.tickMs - q.age) / fade) : 1 });
+  caps.push({ label: `APM ${inp.apm}`, plain: true });
+  for (const c of caps) c.w = c.mouse ? Math.round(14 * d) : Math.max(ch, Math.ceil(ctx.measureText(c.label).width) + Math.round(10 * d));
+  const side = W - (x + FRAME_W * k), widest = Math.max(...caps.map(c => c.w));
+  let ox, oy, vertical = false;
+  if (side >= widest + 20 * d) {   // beside the screen, centred on it (its bottom may be under the timeline)
+    vertical = true; ox = x + FRAME_W * k + 10 * d;
+    oy = Math.max(0, y) + (Math.min(H, y + FRAME_H * k) - Math.max(0, y) - caps.length * (ch + gap)) / 2;
+  } else {   // the map pane's top-right corner (the game's messages are top-left)
+    ox = x + (R.x + R.w - 6) * k - caps.reduce((a, c) => a + c.w + gap, -gap); oy = y + (R.y + 6) * k;
+  }
+  const box = (bx, by, bw, lit, a) => {
+    ctx.globalAlpha = a; ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(bx, by, bw, ch, 4 * d); else ctx.rect(bx, by, bw, ch);
+    ctx.fillStyle = lit ? 'rgba(232,182,74,0.95)' : 'rgba(10,12,16,0.72)'; ctx.fill();
+    ctx.lineWidth = d; ctx.strokeStyle = lit ? 'rgba(255,230,160,0.9)' : 'rgba(255,255,255,0.35)'; ctx.stroke();
+  };
+  for (const c of caps) {
+    if (c.mouse) {   // left and right halves, lit while held
+      const mw = c.w, hh = ch;
+      box(ox, oy, mw, false, 1);
+      ctx.fillStyle = 'rgba(232,182,74,0.95)';
+      if (inp.left) ctx.fillRect(ox + 2 * d, oy + 2 * d, mw / 2 - 2.5 * d, hh * 0.45);
+      if (inp.right) ctx.fillRect(ox + mw / 2 + 0.5 * d, oy + 2 * d, mw / 2 - 2.5 * d, hh * 0.45);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(ox + mw / 2 - 0.5 * d, oy + 2 * d, d, hh * 0.45);
+    } else if (c.plain) {
+      ctx.globalAlpha = 1; ctx.fillStyle = 'rgba(10,12,16,0.72)';
+      ctx.fillRect(ox, oy, c.w, ch);
+      ctx.fillStyle = '#e8e2d0'; ctx.fillText(c.label, ox + c.w / 2, oy + ch / 2 + 0.5 * d);
+    } else {
+      box(ox, oy, c.w, c.lit, c.alpha == null ? 1 : c.alpha);
+      ctx.fillStyle = c.lit ? '#1a1408' : '#f2ecdc'; ctx.fillText(c.label, ox + c.w / 2, oy + ch / 2 + 0.5 * d);
+    }
+    if (vertical) oy += ch + gap; else ox += c.w + gap;
+  }
+  ctx.restore();
 }
 // Free view: the recorded viewports and mouse cursors of the shown players (fog player, or all).
 function drawCams(ctx, m, mctx, mk) {
@@ -1422,6 +1521,196 @@ ui.score.addEventListener('click', e => {
   const v = c.dataset.p === ui.fog.value && !st.pv.on ? '-1' : c.dataset.p;
   ui.fog.value = v; ui.fog.onchange(); drawPlayers(st.session.mem());
 });
+// ---- match stats window (stats.js; K, the stats button): units made and upgrades, kills, economy and units' value
+// over time, so far.
+// A watched player (keys 1-8, the score strip): that player; fog "all": team 1 against team 2, split as the score
+// strip splits them. Live while open (twice a second). Units: the icons, then the economy and army charts; kills: the
+// icons, then the killed value chart. Pointing at an icon marks on the charts' time axis when those were made / lost
+// / killed / researched.
+const mstats = new MatchStats();
+const sw = { el: $('statsWin'), body: $('statsBody'), tip: $('statsTip'), btn: $('statsBtn'), tab: 'units', last: 0, key: '', icons: new Map(), charts: null, hover: null };
+try { sw.tab = localStorage.getItem('w2v.statsTab') === 'kills' ? 'kills' : 'units'; } catch { /* private window */ }
+const TEAM_RGB = [[106, 162, 255], [255, 107, 90]];   // teams: blue / red (players' own colours can be alike)
+const RES_RGB = [[232, 197, 71], [104, 170, 76], [140, 150, 170]], RES_NAME = ['gold', 'lumber', 'oil'], RES_W = [1, 3, 4], SCORE_RGB = [255, 255, 255];
+function setStats(on) {
+  if (on && !st.session) return;
+  sw.el.hidden = !on; sw.btn.classList.toggle('on', on); sw.btn.setAttribute('aria-pressed', String(on));
+  sw.tip.hidden = true; sw.hover = null;
+  if (on) drawStats(true);
+}
+sw.btn.onclick = () => setStats(sw.el.hidden);
+$('statsX').onclick = () => setStats(false);
+for (const b of sw.el.querySelectorAll('.statsTabs button')) b.onclick = () => {
+  sw.tab = b.dataset.tab; try { localStorage.setItem('w2v.statsTab', sw.tab); } catch { /* private window */ }
+  sw.body.scrollTop = 0; sw.hover = null; sw.tip.hidden = true; drawStats(true);
+};
+addEventListener('resize', () => { if (!sw.el.hidden) drawStats(true); });
+function statsGroups(m) {
+  const ps = st.startPlayers || readPlayers(m), w = watched(), rgb = p => st.tileset.rgb[p.colorIdx] || [128, 128, 128], nm = p => p.name || `Player ${p.id + 1}`;
+  const p = w >= 0 && ps.find(x => x.id === w), half = Math.ceil(ps.length / 2), teams = [ps.slice(0, half), ps.slice(half)].filter(t => t.length);
+  if (p) return [{ name: nm(p), sub: `${p.raceName} · ${p.colorName}`, rgb: rgb(p), members: [p.id], team: teams.find(t => t.includes(p)).map(x => x.id) }];
+  return teams.map((t, i) => ({ name: `Team ${i + 1}`, sub: t.map(nm).join(', '), rgb: TEAM_RGB[i], members: t.map(x => x.id), team: t.map(x => x.id) }));
+}
+// a unit type's or an upgrade's button icon (icons by tileset: Ui_StatusPanel table 0x4a3d58, g_UpgradeIcon) in a
+// player's colour (-1: white)
+function statsIcon(type, owner, upgrade = false) {
+  const f = st.pv.frame; if (!f) return null;
+  const m = st.session.mem(), ts = m.r8(A.Tileset) & 3, cb = owner >= 0 ? m.r8(A.PlayerColor + owner) : 0xe8;
+  const idx = upgrade ? m.r16(UPGRADE_ICON + 2 * type) : m.r16(0x4a3d58 + 16 * type), key = `${ts}:${idx}:${cb}`;
+  let u = sw.icons.get(key);
+  if (u === undefined) {
+    const s = new Surface(46, 38), c = createCanvas(46, 38);
+    f.icon(s, ts, idx, 0, 0, cb);
+    c.getContext('2d').putImageData(new ImageData(s.data, 46, 38), 0, 0);
+    sw.icons.set(key, u = c.toDataURL());
+  }
+  return u;
+}
+function drawStats(force = false) {
+  if (sw.el.hidden || !st.session || !st.tileset) return;
+  const m = st.session.mem(), tick = st.session.tick, groups = statsGroups(m);
+  for (const b of sw.el.querySelectorAll('.statsTabs button')) { const on = b.dataset.tab === sw.tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
+  const bw = sw.body.clientWidth - 28, bh = sw.body.clientHeight - 28;
+  const key = `${sw.tab}|${tick}|${groups.map(g => g.members.join()).join('/')}|${bw}x${bh}`;
+  if (!force && key === sw.key) return;
+  sw.key = key; sw.groups = groups; sw.tick = tick;
+  const pinKey = `${sw.tab}|${groups.map(g => g.members.join()).join('/')}`;
+  if (sw.pinKey !== pinKey) { sw.pinKey = pinKey; sw.pin = null; sw.mark = null; }
+  const tm = $('statsTime'), tt = `${groups.length === 1 ? groups[0].name : 'Team 1 vs Team 2'} · so far: ${fmtTime(tick * st.tickMs)}`;
+  if (tm.textContent !== tt) tm.textContent = tt;
+  const rgbOf = id => { const p = (st.startPlayers || []).find(x => x.id === id); return p ? st.tileset.rgb[p.colorIdx] || [128, 128, 128] : [128, 128, 128]; };
+  const o = { icon: (t, p) => statsIcon(t, p), upIcon: (id, p) => statsIcon(id, p, true), name: t => typeName(t, st.pv.art && st.pv.art.statTxt),
+    upName: id => UPGRADE_NAMES[id] || `upgrade ${id}`, building: t => isBuilding(m, t), cost: t => unitCost(m, t), upCost: id => upgradeCost(m, id),
+    playerName: id => st.pv.names[id] || `Player ${id + 1}`, playerRgb: rgbOf, clock: k => fmtTime(k * st.tickMs) };
+  let html;
+  if (sw.tab === 'units') {
+    const alive = groups.map(() => new Map()), gOf = new Map(groups.flatMap((g, i) => g.members.map(p => [p, i])));
+    const base = m.r32(A.Units), n = m.r32(A.UnitCount);
+    for (let i = 0; i < n; i++) {
+      const u = base + 0x98 * i, f = m.r16(u + 0x1e), t = m.r8(u + 0x27), gi = gOf.get(m.r8(u + 0x2c));
+      if (f & 3 || gi === undefined || t >= 110 || isBuilding(m, t) && !(f & 0x80)) continue;
+      alive[gi].set(t, (alive[gi].get(t) || 0) + 1);
+    }
+    html = unitsHtml(o, groups, groups.map(g => mstats.madeBy(tick, g.members)), alive, groups.map(g => mstats.researchBy(tick, g.members)));
+  } else {
+    html = killsHtml(o, groups, groups.map(g => mstats.killsBy(tick, g.members, true, g.team)), groups.map(g => mstats.lostValue(tick, g.members, o.cost)));
+  }
+  html += statsCharts(m, o, groups, sw.tab === 'units' ? ['economy', 'army', 'value'] : ['kills'], bw, bh);
+  if (html !== sw.body._html) {
+    sw.body.innerHTML = sw.body._html = html;
+    if (sw.hover) statsHover(sw.hover);
+    if (sw.pin) sw.body.querySelector(`.stTile[data-mk="${sw.pin}"]`)?.classList.add('pin');
+    statsMarks(sw.mark || sw.pin);
+  }
+  const lg = $('statsLegend'), legend = RES_RGB.map((c, k) => `<span class="key"><i class="sq" style="background:rgb(${c})"></i>${RES_NAME[k]}</span>`).join('') +
+    (sw.tab === 'units' ? `<span class="key"><i style="background:rgb(${SCORE_RGB})"></i>points (right axis)</span>` : '') +
+    (sw.tab === 'units' ? '<span class="key"><i class="mk made"></i>made</span><span class="key"><i class="mk lost"></i>lost</span>' : '<span class="key"><i class="mk lost"></i>killed</span>');
+  if (lg._html !== legend) lg.innerHTML = lg._html = legend;
+}
+// The charts below the icons, per kind a chart per group, one above the other, per game minute:
+//   economy  harvested up (smoothed, centred), spent down (each minute's total)
+//   army     cost of the units made up (starting units left out), of those lost (killed) down, each minute's total
+//   value    cost of the units alive (sampled), and their points (what killing them scores) as a line on its own scale
+//   kills    cost of what the group killed of other teams (units and buildings), each minute's total
+// The areas are drawn with lumber and oil weighed by RES_W against gold; the values shown are the amounts. A kind's
+// scale is shared by both teams, or (a player watched) by all players, so it stays as players are switched.
+function statsCharts(m, o, groups, kinds, bw, bh) {
+  const sr = mstats.series(sw.tick, mstats.read(m)), t = sr.t, sm = v => smoothRate(t, v, st.tickMs), mt = v => minuteTotals(t, v, st.tickMs);
+  const make = (kind, g) => {
+    let pos, neg = [], line = null, title, up, dn;
+    if (kind === 'economy') {
+      pos = ['hg', 'hl', 'ho'].map(f => sm(sr.get(g.members, f)));
+      neg = ['spentGold', 'spentLumber', 'spentOil'].map(f => mt(sr.get(g.members, f)));
+      title = `${g.name} · economy: harvested (up) and spent (down) per minute`; up = 'harvested'; dn = 'spent';
+    } else if (kind === 'army') {
+      const uv = mstats.unitValue(t, g.members, o.cost, o.building, true);
+      pos = uv.made.map(mt); neg = uv.lost.map(mt);
+      title = `${g.name} · army: cost of units made (up) and lost (down) per minute`; up = 'made'; dn = 'lost';
+    } else if (kind === 'value') {
+      pos = ['aliveGold', 'aliveLumber', 'aliveOil'].map(f => sr.get(g.members, f));
+      line = { up: sr.get(g.members, 'alivePoints') };
+      title = `${g.name} · army value: cost of the units alive, their points`; up = 'in units alive';
+    } else {
+      pos = mstats.killedValue(t, g.members, g.team, o.cost).map(mt);
+      title = `${g.name} · value killed per minute`; up = 'killed';
+    }
+    const tip = [...pos.map((v, k) => ({ rgb: RES_RGB[k], label: `${RES_NAME[k]} ${up}`, v })),
+      ...neg.map((v, k) => ({ rgb: RES_RGB[k], label: `${RES_NAME[k]} ${dn}`, v })),
+      ...(line ? [{ rgb: SCORE_RGB, label: 'points', v: line.up }] : [])];
+    const wt = l => l.map((v, k) => v.map(x => x * RES_W[k]));
+    return { title, pos: wt(pos), neg: wt(neg), line, tip };
+  };
+  const sum = (layers, i) => layers.reduce((a, v) => a + v[i], 0);
+  const h = Math.max(200, Math.min(360, Math.round(bh * .42)));
+  sw.charts = []; sw.charts.t = t;
+  let html = '';
+  for (const kind of kinds) {
+    const cs = groups.map(g => make(kind, g));
+    const range = { top: 0, bottom: 0, lineTop: 0, lineBottom: 0 };
+    const ps = st.startPlayers || [], half = Math.ceil(ps.length / 2), teamOf = i => ps.slice(i < half ? 0 : half, i < half ? half : ps.length).map(x => x.id);
+    const scaleBy = groups.length > 1 ? cs : ps.map((p, i) => make(kind, { name: '', members: [p.id], team: teamOf(i) }));
+    for (const c of [...cs, ...scaleBy]) for (let i = 0; i < t.length; i++) {
+      range.top = Math.max(range.top, sum(c.pos, i)); range.bottom = Math.max(range.bottom, sum(c.neg, i));
+      if (c.line) range.lineTop = Math.max(range.lineTop, c.line.up[i]);
+    }
+    html += cs.map((c, gi) => {
+      sw.charts.push(c);
+      return `<div data-chart="${sw.charts.length - 1}" data-g="${gi}">${stackChartSvg({ title: c.title, t,
+        pos: c.pos.map((v, k) => ({ rgb: RES_RGB[k], v })), neg: c.neg.map((v, k) => ({ rgb: RES_RGB[k], v })),
+        line: c.line && { up: { rgb: SCORE_RGB, v: c.line.up } }, range, w: bw, h, tickMs: st.tickMs, yLabels: false })}</div>`;
+    }).join('');
+  }
+  return `<div class="stCharts">${html}</div>`;
+}
+// Pointing at an icon, or a click on it (on and off; phones have no pointing): marks on the time axis of that group's
+// charts, when those were made (up) and lost / killed (down; red). mk: the icon's data-mk (u:group:type,
+// k:group:type:victims' player, r:group:tick), or null to clear.
+function statsMarks(mk) {
+  const [kind, gs, a, b] = (mk || '').split(':'), gi = +gs, g = sw.groups && sw.groups[gi];
+  let made = [], lost = [];
+  if (g && kind === 'u') ({ made, lost } = mstats.typeTimes(sw.tick, g.members, +a));
+  else if (g && kind === 'k') lost = mstats.killTimes(sw.tick, g.members, +a, +b);
+  else if (g && kind === 'r') made = [+a];
+  for (const div of sw.body.querySelectorAll('.stCharts > div')) {
+    const svg = div.querySelector('svg.stChart'), gEl = svg && svg.querySelector('g.marks'); if (!gEl) continue;
+    if (!g || +div.dataset.g !== gi) { if (gEl.innerHTML) gEl.innerHTML = ''; continue; }
+    const L = +svg.dataset.l, W = +svg.dataset.w, tmax = +svg.dataset.tmax, y = +svg.dataset.b, X = k => (L + W * Math.min(k, tmax) / tmax).toFixed(1);
+    gEl.innerHTML = made.map(k => `<path class="mk made" d="M${X(k)} ${y - 7}l-4 7h8z"/>`).join('') +
+      lost.map(k => `<path class="mk lost" d="M${X(k)} ${y + 7}l-4 -7h8z"/>`).join('');
+  }
+}
+sw.body.addEventListener('pointerover', e => { const t = e.target.closest('.stTile[data-mk]'); if (t) statsMarks(sw.mark = t.dataset.mk); });
+sw.body.addEventListener('pointerout', e => { const t = e.target.closest('.stTile[data-mk]'); if (t && !t.contains(e.relatedTarget)) statsMarks((sw.mark = null) || sw.pin); });
+sw.body.addEventListener('click', e => {
+  const t = e.target.closest('.stTile[data-mk]'); if (!t) return;
+  sw.pin = sw.pin === t.dataset.mk ? null : t.dataset.mk;
+  for (const x of sw.body.querySelectorAll('.stTile.pin')) x.classList.remove('pin');
+  if (sw.pin) t.classList.add('pin');
+  statsMarks(sw.pin);
+});
+// chart hover: a line at the nearest sample and every series' value there
+function statsHover(h) {
+  const svg = h && sw.charts && document.elementFromPoint(h.x, h.y)?.closest('svg.stChart');
+  for (const c of sw.body.querySelectorAll('svg.stChart .cur')) c.setAttribute('visibility', 'hidden');
+  if (!svg) { sw.tip.hidden = true; return; }
+  const ch = sw.charts[+svg.parentElement.dataset.chart], t = sw.charts.t; if (!ch || !t.length) { sw.tip.hidden = true; return; }
+  const r = svg.getBoundingClientRect(), L = +svg.dataset.l, W = +svg.dataset.w, tmax = +svg.dataset.tmax;
+  const want = Math.max(0, Math.min(1, (h.x - r.left - L) / W)) * tmax;
+  let i = 0; for (let k = 1; k < t.length; k++) if (Math.abs(t[k] - want) < Math.abs(t[i] - want)) i = k;
+  const x = L + W * t[i] / tmax, cur = svg.querySelector('.cur');
+  cur.setAttribute('x1', x); cur.setAttribute('x2', x); cur.setAttribute('visibility', 'visible');
+  sw.tip.innerHTML = `<div class="t">${esc(ch.title)} · ${fmtTime(t[i] * st.tickMs)}</div>` +
+    ch.tip.map(s => `<div><i style="background:rgb(${s.rgb})"></i>${esc(s.label)}: <b>${fmtNum(s.v[i])}</b></div>`).join('');
+  sw.tip.hidden = false;
+  const wr = sw.el.getBoundingClientRect(), tw = sw.tip.offsetWidth, th = sw.tip.offsetHeight;
+  let lx = h.x - wr.left + 14, ly = h.y - wr.top + 14;
+  if (lx + tw > wr.width - 8) lx = h.x - wr.left - tw - 14;
+  if (ly + th > wr.height - 8) ly = h.y - wr.top - th - 14;
+  sw.tip.style.left = `${Math.max(4, lx)}px`; sw.tip.style.top = `${Math.max(4, ly)}px`;
+}
+sw.body.addEventListener('pointermove', e => { sw.hover = { x: e.clientX, y: e.clientY }; statsHover(sw.hover); });
+sw.body.addEventListener('pointerleave', () => { sw.hover = null; statsHover(null); });
+
 // ---- one HUD column: score strip at the top, the players panel below it, the minimap at the bottom. When the panel
 // does not fit between them it goes to the edge (top) and the score strip moves next to it, towards the centre.
 // The column sits on the left and moves to the right edge while the view is at the map's left edge, so it does not
@@ -1520,6 +1809,7 @@ const HUD_KEYS = {
   y: () => { const on = document.body.classList.contains('sideMin'); setSideMin(!on); toast(on ? 'Players panel shown' : 'Players panel hidden'); },
   x: () => fullBtn.click(),
   b: () => copyBalloonStub(),
+  k: () => setStats(sw.el.hidden),
   m: () => {
     hudSide = { auto: 'left', left: 'right', right: 'auto' }[hudSide];
     try { localStorage.setItem('w2v.side', hudSide); } catch { /* private window */ }

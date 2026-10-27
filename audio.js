@@ -25,7 +25,7 @@
 // Volume: master -> voice bus (unit voices, the player view's spoken notices) + FX bus (everything else); the
 // microphones (micplay.js) go to the master too.
 
-export const HK = { SOUND: 1, VOICE_SELECT: 2, VOICE_ACK: 3, STATUS_MSG: 4, MSG_TIMED: 5, MUSIC: 12, STOP_SOUNDS: 13, SFX: 16, CMD: 17, KILL: 18 };
+export const HK = { SOUND: 1, VOICE_SELECT: 2, VOICE_ACK: 3, STATUS_MSG: 4, MSG_TIMED: 5, MUSIC: 12, STOP_SOUNDS: 13, SFX: 16, CMD: 17, KILL: 18, KILL_CREDIT: 19, RESEARCH: 20 };
 export const HKS_POSITIONAL = 1, HKS_FAR = 2, HKS_SELECT = 4, HKS_OTHER = 8, HKS_ALT = 16;
 // HKS_ALT: a plugin's replacement sample (Peon2k: bloodlusted knights / paladins shout PEON2K\ajmoo.wav, which the
 // plugin writes out of its DLL). Played when the viewer has that file (from the user's plugin/peon2k.w2p).

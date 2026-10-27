@@ -526,9 +526,10 @@ export class PlayerFrame {
     const bd = art.dlg.btn;
     if (bd) for (const b of commandButtons(m, p, sel)) {
       const c = bd.byId(b.slot); if (!c) continue;
-      const x = bd.dlg.l + c.l, y = bd.dlg.t + c.t;
-      this.button(s, x, y, c.r - c.l + 1, c.b - c.t + 1, false);
-      this.icon(s, tileset, b.icon, x + 4, y + 4, colorBase);
+      const x = bd.dlg.l + c.l, y = bd.dlg.t + c.t, w = c.r - c.l + 1, h = c.b - c.t + 1;
+      const q = o.press, down = !!q && q.x >= x && q.x < x + w && q.y >= y && q.y < y + h;   // the recorded mouse holds it
+      this.button(s, x, y, w, h, down);
+      this.icon(s, tileset, b.icon, x + 4 + down, y + 4 + down, colorBase);
     }
 
     const ctx = this.canvas.getContext('2d');
