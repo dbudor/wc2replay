@@ -33,6 +33,7 @@
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6.5h16M4 12h16M4 17.5h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></g></symbol>
   <symbol id="i-map" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></g></symbol>
+  <symbol id="i-stats" viewBox="0 0 24 24"><g fill="currentColor"><rect x="3" y="12" width="4" height="8" rx="1"/><rect x="10" y="5" width="4" height="15" rx="1"/><rect x="17" y="9" width="4" height="11" rx="1"/></g></symbol>
   <symbol id="i-panel" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM14 5v14" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
 </svg>
 <main id="stage">
@@ -78,10 +79,25 @@
       <button id="follow" class="iconBtn mapBtn" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)"><svg><use href="#i-follow"/></svg></button>
       <button id="scoreBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the score strip (S)"><svg><use href="#i-score"/></svg></button>
       <button id="seekBtn" class="iconBtn mapBtn" data-mode="auto" title="Timeline: auto (fades while playing) (T)"><svg><use href="#i-seek"/></svg></button>
+      <button id="statsBtn" class="iconBtn mapBtn" aria-pressed="false" title="Match stats: units made, kills, economy and army over time, so far (K)"><svg><use href="#i-stats"/></svg></button>
       <button id="miniBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the minimap"><svg><use href="#i-map"/></svg></button>
       <button id="sideOpen" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the players panel (Y)"><svg><use href="#i-panel"/></svg></button>
       <label class="iconBtn mapBtn pvBtn" title="Player view: the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"><svg><use href="#i-pview"/></svg></label>
     </div></div>
+
+  <div id="statsWin" class="statsWin glass" hidden role="dialog" aria-label="Match stats">
+    <div class="statsTop">
+      <div class="statsTabs" role="tablist">
+        <button data-tab="units" role="tab" title="Units and buildings made so far, with how many are alive now (the top number) over how many were made (the bottom one; finished buildings, an upgraded hall counts again as its new type), the upgrades and spells researched, and the economy and army charts. Point at an icon to mark on the charts when those were made and lost">Units</button>
+        <button data-tab="kills" role="tab" title="What was killed so far, a row per victims' player, friendly kills marked, with the cost of what was killed and of what was lost, and a chart of the value killed. Point at an icon to mark on the chart when those were killed">Kills</button>
+      </div>
+      <span id="statsLegend" class="statsLegend"></span>
+      <span id="statsTime" class="statsTime"></span>
+      <button id="statsX" class="iconBtn statsX" title="Close (Esc, K)">×</button>
+    </div>
+    <div id="statsBody" class="statsBody"></div>
+    <div id="statsTip" class="statsTip" hidden></div>
+  </div>
 
   <div id="controls" class="controls glass" hidden>
     <div class="timeline">
@@ -105,6 +121,7 @@
       <span class="viewTogs">
         <label class="chk" title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
         <label id="camBox" class="chk" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
+        <label id="inputBox" class="chk" hidden title="Player view: the recorded mouse buttons, drag box and keys of that player (I): clicks, the box being dragged, the pressed command button, the keys pressed and actions per minute. Needs a recording by the current CamRec plugin."><input id="inputShow" type="checkbox" checked> Input</label>
       </span>
       <span id="pvSlot" class="pvSlot"></span>
       <span class="audio">

@@ -457,10 +457,21 @@ export function renderOutro(art, O, t = 99, footer = '') {
       s.text(f, String(val), x, y + Math.max(0, Math.round((h - f.maxH) / 2)), R, 'c', w);
     });
   });
-  const cont = by(-2);
+  const cont = by(-2), st = outroStatsButton(art, O), sc = { l: st.x, t: st.y, r: st.x + st.w - 1, b: st.y + st.h - 1, flags: cont ? cont.flags : 0 };
   if (cont) button(s, ctrlFont(F, cont), cont, cont.text || 'Continue', R, pal);
-  if (footer) s.text(F.f10, s.fitText(F.f10, footer, 440), 6, 464, R);
+  button(s, ctrlFont(F, sc), sc, 'Stats', R, pal);
+  if (footer) s.text(F.f10, s.fitText(F.f10, footer, st.x - 12), 6, 464, R);
   return s;
+}
+
+// The viewer's own "Stats" button on the end screen (opens the match stats window), 640x480 screen coordinates: the
+// size of "Continue", left of it on the bottom line (above it the 4 players' screen has its last name); the 8
+// players' screen has no "Continue": where it would be.
+const CONTINUE = { l: 456, t: 448, r: 561, b: 475 };
+export function outroStatsButton(art, O) {
+  const n = O.rows.length, D = art.statDlg[n < 3 ? 2 : n < 5 ? 4 : n < 7 ? 6 : 8], c = D && D.byId(-2);
+  const r = c || CONTINUE, w = r.r - r.l + 1, h = r.b - r.t + 1;
+  return { x: c ? c.l - w - 10 : r.l, y: r.t, w, h };
 }
 
 // ---------------------------------------------------------------- who left / was eliminated, while stepping

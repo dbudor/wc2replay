@@ -80,7 +80,7 @@ export const UPGRADE_NAMES = ['Swords 1', 'Swords 2', 'Axes 1', 'Axes 2', 'Arrow
   'Slow', 'Invisibility', 'Polymorph', 'Blizzard', 'Eye of Kilrogg', 'Bloodlust', 'Raise Dead', 'Death Coil', 'Whirlwind',
   'Haste', 'Unholy Armor', 'Runes', 'Death and Decay'];
 
-const typeName = (t, tbl) => (tbl && tbl(t + 2)) || (UNIT_NAMES[t] || `type ${t}`).replace(/([a-z])([A-Z])/g, '$1 $2');
+export const typeName = (t, tbl) => (tbl && tbl(t + 2)) || (UNIT_NAMES[t] || `type ${t}`).replace(/([a-z])([A-Z])/g, '$1 $2');
 const fmt = (ticks, tickMs) => { const s = Math.max(0, Math.round(ticks * tickMs / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const plus = n => n > 0 ? ` +${n}` : n < 0 ? ` ${n}` : '';
 

@@ -392,3 +392,73 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
   .inspect.float { width: 220px; max-height: calc(100% - var(--hud-b) - 20px); overflow-y: auto; }
   body:has(#controls[hidden]) #bar { width: min(560px, calc(100% - 24px)); padding: 14px 18px; gap: 8px; }
 }
+
+/* ---- match stats window (K): as large as the page, over everything */
+.statsWin { inset: 16px; z-index: 8; display: flex; flex-direction: column; background: rgba(13, 15, 21, .95); overflow: hidden; }
+.statsWin[hidden] { display: none; }
+.statsTop { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); }
+.statsTabs { display: flex; gap: 4px; }
+.statsTabs button { font: inherit; font-size: 13px; font-weight: 600; color: var(--muted); background: rgba(255, 255, 255, .05); border: 1px solid var(--edge);
+  border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.statsTabs button:hover { color: var(--text); background: rgba(255, 255, 255, .1); }
+.statsTabs button.on { background: var(--accent); color: #1a1408; border-color: transparent; }
+.statsTime { margin-left: auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.statsX { width: 32px; height: 32px; font-size: 20px; line-height: 1; }
+.statsLegend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+.statsLegend button { font: inherit; color: var(--text); background: none; border: 0; padding: 2px 0; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.statsLegend button.off { opacity: .35; }
+.statsLegend i { width: 14px; height: 3px; border-radius: 2px; }
+.statsLegend .key { color: var(--muted); display: inline-flex; align-items: center; gap: 5px; }
+.statsLegend .key svg { width: 22px; height: 6px; }
+.statsLegend i.sq { width: 10px; height: 10px; }
+.statsLegend i.mk { width: 0; height: 0; border-radius: 0; border: 5px solid transparent; }
+.statsLegend i.mk.made { border-bottom: 8px solid #fff; border-top: 0; }
+.statsLegend i.mk.lost { border-top: 8px solid var(--bad); border-bottom: 0; }
+.statsBody { flex: 1; overflow: auto; padding: 12px 14px 16px; scrollbar-width: thin; scrollbar-color: #ffffff22 transparent; }
+.stPlayer { margin-bottom: 16px; }
+.stHead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 6px; }
+.stHead > i { align-self: center; width: 12px; height: 12px; border-radius: 3px; }
+.stName { font-weight: 700; }
+.stRace { color: var(--muted); font-size: 12px; }
+.stSum { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.stRes { display: inline-flex; gap: 6px; color: var(--text); }
+.stRes span::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; }
+.stRes .g::before { background: #e8c547; } .stRes .l::before { background: #5f9a45; } .stRes .o::before { background: #4b5563; }
+.stTiles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.stTile { position: relative; width: 50px; height: 42px; border-radius: 4px; background: #000; border: 2px solid #3a3a3a; overflow: hidden; }
+.stTile img { display: block; width: 46px; height: 38px; image-rendering: pixelated; }
+.stTile b { position: absolute; right: 1px; bottom: 0; padding: 0 3px; font-size: 12px; line-height: 15px; border-radius: 3px; background: rgba(0, 0, 0, .75);
+  color: #fff; font-variant-numeric: tabular-nums; }
+.stTile b.top { top: 0; bottom: auto; color: var(--accent-2); }
+.stTile.gone img { opacity: .45; }
+.stTile[data-mk] { cursor: pointer; }
+.stTile.pin, .stTile.own.pin { border-color: #fff; }
+.stRow { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 6px; }
+.stLbl { flex: 0 0 120px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding-top: 4px; font-size: 12px; color: var(--muted); }
+.stLbl > i { width: 10px; height: 10px; border-radius: 3px; }
+.stLbl .stRes { font-size: 11px; flex-wrap: wrap; }
+.stRow .stTiles { flex: 1; margin-bottom: 0; }
+.stTile.own { border-color: var(--bad); }
+.stTile.own::after { content: "friendly"; position: absolute; left: 1px; top: 0; font-size: 9px; line-height: 12px; padding: 0 2px; border-radius: 2px; background: var(--bad); color: #fff; }
+.stNoIcon { display: block; padding: 2px; font-size: 9px; line-height: 1.1; color: var(--muted); }
+.stNone { color: var(--muted); font-size: 12px; }
+.stCharts { display: grid; gap: 12px; }
+.stChart { display: block; cursor: crosshair; }
+.stChart .ttl { fill: var(--text); font-size: 13px; font-weight: 700; }
+.stChart .ax { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.stChart .grid { stroke: rgba(255, 255, 255, .08); }
+.stChart .grid.zero { stroke: rgba(255, 255, 255, .45); }
+.stChart .ax.line { fill: #fff; }
+.stChart .cur { stroke: rgba(255, 255, 255, .5); }
+.stChart .mk.made { fill: #fff; }
+.stChart .mk.lost { fill: var(--bad); }
+.stCharts { margin-top: 14px; }
+.statsTip { position: absolute; z-index: 1; pointer-events: none; padding: 6px 9px; border-radius: 8px; background: rgba(0, 0, 0, .88); border: 1px solid var(--edge);
+  font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.statsTip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; }
+.statsTip .t { color: var(--muted); margin-bottom: 2px; }
+@media (max-width: 640px) { .stRow { flex-direction: column; gap: 2px; } .stLbl { flex-basis: auto; } .statsWin { inset: 6px; } .statsBody { padding: 10px; } .statsTime { display: none; } }
+@media (min-width: 1400px) and (min-height: 700px) {   /* a big window: icons at 1.5x */
+  .stTile { width: 73px; height: 61px; } .stTile img { width: 69px; height: 57px; } .stTile b { font-size: 14px; line-height: 17px; }
+  .stLbl { flex-basis: 150px; font-size: 13px; }
+}

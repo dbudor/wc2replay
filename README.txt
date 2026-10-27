@@ -45,7 +45,7 @@ War2Dat.mpq, optionally War2Patch.mpq, and the replay. Only version 2.02 of Warc
 
 A replay starts on the game's chat-room screen (who played, races, map and options); press Play to start. At the
 end the game's victory / defeat statistics screen is shown for the player picked under "Fog of war" (or the
-recording player).
+recording player); its "Stats" button opens the match stats (below).
 
 Controls: Play/Pause, Step (one network turn), speed, timeline seek, drag to scroll, wheel to zoom, click
 the minimap, fog of war as any player.
@@ -58,6 +58,27 @@ Click a unit or building on the map (free or player view) for its stats, as the 
 any player: armor, damage, range, sight with upgrade bonuses, speed, magic, current order, a worker's load, a
 transport's cargo, spell timers; construction and training / research progress with the time left; gold or oil
 left in a mine, food grown/used at a farm, a town hall's production rates. The card follows the unit as it plays.
+Match stats (K, or the bar-chart button by the minimap) open a window over the page, for the game so far: with a
+player picked (keys 1-8, or a click in the score strip), that player; with fog "all", team 1 against team 2 (as
+the score strip splits them).
+* Units: an icon for each unit and building type, with how many are alive now (top number) over how many were
+  made (bottom; buildings when finished, an upgraded hall or tower or a unit converted by an upgrade counts again
+  as its new type, as the game's own stats do); a dimmed icon means none are left. Below them the upgrades and
+  spells researched, in order (point at one for when and its cost). Below them three charts:
+  - Economy: gold, lumber and oil harvested per game minute (stacked above the line, smoothed) and spent (stacked
+    below, each minute's total).
+  - Army: the gold, lumber and oil cost of the units made in each game minute (above; starting units left out) and
+    of those lost (below; killed or not, as demolition squads).
+  - Army value: the gold, lumber and oil cost of the units alive, with their points (what killing them scores) as
+    a white line on its own scale (right axis).
+* Kills: what was killed, a row per player killed (enemies first), each icon in that player's colour, in unit
+  type order; friendly kills (own and team mates' units) are marked. With the cost of what was killed and of what
+  was lost, and below a chart of the value killed of the other team in each game minute.
+Point at or click an icon (click again to clear; on a phone, tap) to mark on the charts' time axis when those
+were made (white, up) and lost or killed (red, down).
+Teams' charts are one above the other on the same scale; a player's chart has the scale of the player with the
+most, so it stays as you switch players. The areas count lumber x3 and oil x4 against gold. Point at a chart for
+the amounts at that time. Esc or K closes the window.
 Phones and tablets: tap a unit for its card (a sheet over the bottom of the map; close it with x), drag to
 scroll, pinch to zoom, -10s / +10s buttons for the arrow keys. In portrait the players and events are below the
 map; the player view shows the game's 4:3 screen with the card under it. Sound starts on the first tap.
@@ -129,6 +150,9 @@ In the viewer:
 * in the free view each player's viewport and cursor are drawn on the map and minimap (the fog-of-war player, or
   everyone when fog is "all");
 * "Cameras" (key C) turns all of this off;
+* the Player view also shows that player's input (recordings by the current plugin): the drag box as they dragged it,
+  a ring where they clicked (yellow left, red right), the command button they pressed, and beside the screen their
+  mouse buttons, Shift / Ctrl / Alt, the last keys pressed and actions per minute. "Input" (key I) hides it;
 * voices play at 1x speed, at the game time they were said: "mics" turns them on or off (with its own volume).
   With "follows view" (on at first) you hear only the player picked in Fog of war (keys 1-8). Otherwise, and with
   fog "all", you hear the players whose "mic" button in the players list you switched on (none at first; clicking
