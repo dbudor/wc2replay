@@ -1610,7 +1610,9 @@ function drawStats(force = false) {
 // The charts below the icons, per kind a chart per group, one above the other, per game minute:
 //   economy  harvested up (smoothed, centred), spent down (each minute's total)
 //   army     cost of the units made up (starting units left out), of those lost (killed) down, each minute's total
-//   value    cost of the units alive (sampled), and their points (what killing them scores) as a line on its own scale
+//   value    cost of what is alive (sampled): combat units and towers up, noncombat (workers, tankers, transports,
+//            flying machines / zeppelins, other buildings) down; their points (what killing them scores) as lines on
+//            their own scale
 //   kills    cost of what the group killed of other teams (units and buildings), each minute's total
 // The areas are drawn with lumber and oil weighed by RES_W against gold; the values shown are the amounts. A kind's
 // scale is shared by both teams, or (a player watched) by all players, so it stays as players are switched.
@@ -1628,15 +1630,16 @@ function statsCharts(m, o, groups, kinds, bw, bh) {
       title = `${g.name} · army: cost of units made (up) and lost (down) per minute`; up = 'made'; dn = 'lost';
     } else if (kind === 'value') {
       pos = ['aliveGold', 'aliveLumber', 'aliveOil'].map(f => sr.get(g.members, f));
-      line = { up: sr.get(g.members, 'alivePoints') };
-      title = `${g.name} · army value: cost of the units alive, their points`; up = 'in units alive';
+      neg = ['ncGold', 'ncLumber', 'ncOil'].map(f => sr.get(g.members, f));
+      line = { up: sr.get(g.members, 'alivePoints'), down: sr.get(g.members, 'ncPoints') };
+      title = `${g.name} · value alive: combat (up), noncombat (down), their points`; up = 'combat'; dn = 'noncombat';
     } else {
       pos = mstats.killedValue(t, g.members, g.team, o.cost).map(mt);
       title = `${g.name} · value killed per minute`; up = 'killed';
     }
     const tip = [...pos.map((v, k) => ({ rgb: RES_RGB[k], label: `${RES_NAME[k]} ${up}`, v })),
       ...neg.map((v, k) => ({ rgb: RES_RGB[k], label: `${RES_NAME[k]} ${dn}`, v })),
-      ...(line ? [{ rgb: SCORE_RGB, label: 'points', v: line.up }] : [])];
+      ...(line ? [{ rgb: SCORE_RGB, label: 'combat points', v: line.up }, { rgb: SCORE_RGB, label: 'noncombat points', v: line.down }] : [])];
     const wt = l => l.map((v, k) => v.map(x => x * RES_W[k]));
     return { title, pos: wt(pos), neg: wt(neg), line, tip };
   };
@@ -1651,13 +1654,13 @@ function statsCharts(m, o, groups, kinds, bw, bh) {
     const scaleBy = groups.length > 1 ? cs : ps.map((p, i) => make(kind, { name: '', members: [p.id], team: teamOf(i) }));
     for (const c of [...cs, ...scaleBy]) for (let i = 0; i < t.length; i++) {
       range.top = Math.max(range.top, sum(c.pos, i)); range.bottom = Math.max(range.bottom, sum(c.neg, i));
-      if (c.line) range.lineTop = Math.max(range.lineTop, c.line.up[i]);
+      if (c.line) { range.lineTop = Math.max(range.lineTop, c.line.up[i]); range.lineBottom = Math.max(range.lineBottom, c.line.down[i]); }
     }
     html += cs.map((c, gi) => {
       sw.charts.push(c);
       return `<div data-chart="${sw.charts.length - 1}" data-g="${gi}">${stackChartSvg({ title: c.title, t,
         pos: c.pos.map((v, k) => ({ rgb: RES_RGB[k], v })), neg: c.neg.map((v, k) => ({ rgb: RES_RGB[k], v })),
-        line: c.line && { up: { rgb: SCORE_RGB, v: c.line.up } }, range, w: bw, h, tickMs: st.tickMs, yLabels: false })}</div>`;
+        line: c.line && { up: { rgb: SCORE_RGB, v: c.line.up }, down: { rgb: SCORE_RGB, v: c.line.down } }, range, w: bw, h, tickMs: st.tickMs, yLabels: false })}</div>`;
     }).join('');
   }
   return `<div class="stCharts">${html}</div>`;

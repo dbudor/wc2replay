@@ -69,8 +69,10 @@ the score strip splits them).
     below, each minute's total).
   - Army: the gold, lumber and oil cost of the units made in each game minute (above; starting units left out) and
     of those lost (below; killed or not, as demolition squads).
-  - Army value: the gold, lumber and oil cost of the units alive, with their points (what killing them scores) as
-    a white line on its own scale (right axis).
+  - Army value: the gold, lumber and oil cost of what is alive: combat units and towers above, noncombat below
+    (peasants / peons, tankers, transports, flying machines / zeppelins, buildings other than towers; an upgraded
+    hall or tower with what it was upgraded from). Their points (what killing them scores) as white lines on their
+    own scale (right axis).
 * Kills: what was killed, a row per player killed (enemies first), each icon in that player's colour, in unit
   type order; friendly kills (own and team mates' units) are marked. With the cost of what was killed and of what
   was lost, and below a chart of the value killed of the other team in each game minute.
