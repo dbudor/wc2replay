@@ -28,10 +28,17 @@ export const SAMPLE_MS = 2000;
 const COST = [0x4ce8ec, 0x4cec3c, 0x4cedac], POINTS = 0x4cf190, UPG_COST = [0x4d0138, 0x4d0208, 0x4d01a0];
 export const UPGRADE_ICON = 0x4cff60;
 const SKIP = new Set([0x39, 0x5c, 0x5d, 0x5e, 0x5f, 0x64, 0x65, 0x66, 0x69, 0x6a, 0x6b, 0x6c, 0x6d]);
-const F = { gold: 0, lumber: 1, oil: 2, hg: 3, hl: 4, ho: 5, score: 6, aliveGold: 7, aliveLumber: 8, aliveOil: 9, alivePoints: 10 }, NF = 11;
+const F = { gold: 0, lumber: 1, oil: 2, hg: 3, hl: 4, ho: 5, score: 6, aliveGold: 7, aliveLumber: 8, aliveOil: 9, alivePoints: 10,
+  ncGold: 11, ncLumber: 12, ncOil: 13, ncPoints: 14 }, NF = 15;
+// noncombat: workers, tankers, transports, flying machines / zeppelins and buildings other than towers
+const NONCOMBAT = new Set([2, 3, 26, 27, 28, 29, 40, 41]), TOWER = new Set([64, 65, 96, 97, 98, 99]);
+export const combat = (m, t) => isBuilding(m, t) ? TOWER.has(t) : !NONCOMBAT.has(t);
+// an upgraded building's type costs only the upgrade: what stands is worth the whole chain
+const UPGRADED = { 88: 74, 89: 75, 90: 88, 91: 89, 96: 64, 97: 65, 98: 64, 99: 65 };
 export const isBuilding = (m, t) => !!(m.r32(A.TypeFlags + 4 * t) & 0x20);
 export const cost = (m, t) => COST.map(a => 10 * m.r8(a + t));
 export const points = (m, t) => m.r16(POINTS + 2 * t);
+export const standingCost = (m, t) => { const c = cost(m, t); for (let b = UPGRADED[t]; b !== undefined; b = UPGRADED[b]) cost(m, b).forEach((x, k) => { c[k] += x; }); return c; };
 export const upgradeCost = (m, id) => UPG_COST.map(a => m.r16(a + 2 * id));
 
 export class MatchStats {
@@ -106,14 +113,15 @@ export class MatchStats {
       v[o + 3] = m.r32(0x4ab9c4 + 4 * p); v[o + 4] = m.r32(0x4ad3a8 + 4 * p); v[o + 5] = m.r32(0x4abc98 + 4 * p);
       v[o + 6] = m.r32(0x4ace00 + 4 * p);
     }
-    // the units alive (not buildings; as counted made): their cost and points
+    // the units and finished buildings alive (as counted made): their cost (of an upgraded one, with what it was
+    // upgraded from) and points, combat (alive*) and noncombat (nc*)
     const u8 = m.u8, dv = m.dv, n = m.r32(A.UnitCount);
     for (let i = 0, u = m.base + m.r32(A.Units); i < n; i++, u += 0x98) {
-      if (dv.getUint16(u + 0x1e, true) & 3) continue;
+      const f = dv.getUint16(u + 0x1e, true); if (f & 3) continue;
       const t = u8[u + 0x27], p = u8[u + 0x2c];
-      if (p >= 8 || t >= 110 || SKIP.has(t) || isBuilding(m, t)) continue;
-      const o = p * NF, c = cost(m, t);
-      v[o + 7] += c[0]; v[o + 8] += c[1]; v[o + 9] += c[2]; v[o + 10] += points(m, t);
+      if (p >= 8 || t >= 110 || SKIP.has(t) || isBuilding(m, t) && !(f & 0x80)) continue;
+      const o = p * NF + (combat(m, t) ? 7 : 11), c = standingCost(m, t);
+      v[o] += c[0]; v[o + 1] += c[1]; v[o + 2] += c[2]; v[o + 3] += points(m, t);
     }
     return v;
   }
