@@ -462,3 +462,10 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
   .stTile { width: 73px; height: 61px; } .stTile img { width: 69px; height: 57px; } .stTile b { font-size: 14px; line-height: 17px; }
   .stLbl { flex-basis: 150px; font-size: 13px; }
 }
+
+/* live games (livesrc.js): at the live edge red, behind it grey with how far */
+.liveBtn { font: 700 11px/1 system-ui, sans-serif; letter-spacing: .06em; border: 0; border-radius: 4px; padding: 4px 6px; cursor: pointer;
+  background: rgba(255, 255, 255, .12); color: var(--muted); white-space: nowrap; }
+.liveBtn::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 0; }
+.liveBtn.edge { background: #c62828; color: #fff; }
+.liveBtn.done { background: rgba(255, 255, 255, .08); }

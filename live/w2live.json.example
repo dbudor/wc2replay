@@ -1,0 +1,11 @@
+{
+  "game": "C:\\War2Combat",
+  "iface": [],
+  "out": "recordings",
+  "relay": { "url": "https://w2live.YOURNAME.workers.dev", "token": "the relay's TOKEN" },
+  "delay": 0,
+  "title": "",
+  "peer": "host",
+  "rules": null,
+  "keepPcap": true
+}

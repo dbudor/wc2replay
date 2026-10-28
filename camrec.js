@@ -4,7 +4,8 @@
 // Sources, all carrying the same packets (format: plugins/camrec/README.md):
 //   - a capture: the plugin's UDP broadcasts to port 34755 (every player that ran it);
 //   - camrec\*.w2c files the plugin writes ("W2CF", u32 version, records {u16 len, packet});
-//   - a converted .w2r: a 'CAMR' chunk after 'END ' holding a .w2c image (the sim's readers stop at END).
+//   - a converted .w2r: a 'CAMR' chunk after 'END ' holding a .w2c image (the sim's readers stop at END);
+//   - a live stream (livecap.js): 'CAMP' chunks between the turns, each some .w2c records (no file header).
 // Packet: "W2CM", u8 version 1, u8 kind (1 start, 2 samples, 3 end), u8 player, u8 peer, u32 session, u16 seq, u16 0.
 //   start: +16 local IPX address[16], u16 map size, u8 extended, u8 multiplayer, u16 tiles w, h, s16 map rect[4],
 //          s16 minimap rect[4], u32 SyncRng, u16 time[6], char map[32]
@@ -26,22 +27,26 @@ export const CAM_PORT = 34755;
 const MAGIC = [0x57, 0x32, 0x43, 0x4d];      // W2CM
 const FILE_MAGIC = [0x57, 0x32, 0x43, 0x46]; // W2CF
 const dec = new TextDecoder('latin1');
-const isPacket = p => p.length >= 16 && MAGIC.every((c, i) => p[i] === c) && p[4] === 1;
+export const isCamPacket = p => p.length >= 16 && MAGIC.every((c, i) => p[i] === c) && p[4] === 1;
 
 export function camPacketsFromCapture(bytes) {
   const out = [];
-  for (const d of udpDatagrams(bytes)) if (d.dp === CAM_PORT && isPacket(d.pl)) out.push(d.pl.slice());
+  for (const d of udpDatagrams(bytes)) if (d.dp === CAM_PORT && isCamPacket(d.pl)) out.push(d.pl.slice());
   return out;
 }
 export function isW2c(b) { return b.length >= 8 && FILE_MAGIC.every((c, i) => b[i] === c); }
 export function camPacketsFromW2c(b) {
   if (!isW2c(b)) return [];
+  return camRecords(b, 8);
+}
+// .w2c records {u16 len, packet} from offset i (a .w2c after its header; a live stream's CAMP chunk: livecap.js)
+function camRecords(b, i = 0) {
   const out = [];
-  for (let i = 8; i + 2 <= b.length;) {
+  for (; i + 2 <= b.length;) {
     const n = b[i] | b[i + 1] << 8; i += 2;
     if (i + n > b.length) break;
     const p = b.subarray(i, i + n); i += n;
-    if (isPacket(p)) out.push(p.slice());
+    if (isCamPacket(p)) out.push(p.slice());
   }
   return out;
 }
@@ -65,8 +70,12 @@ function chunks(w2r) {
   return out;
 }
 export function camPacketsFromW2r(w2r) {
-  const c = chunks(w2r).find(c => c.tag === 'CAMR');
-  return c ? camPacketsFromW2c(c.data) : [];
+  const out = [];
+  for (const c of chunks(w2r)) {
+    if (c.tag === 'CAMR') out.push(...camPacketsFromW2c(c.data));
+    else if (c.tag === 'CAMP') out.push(...camRecords(c.data));   // a live stream's pieces (livecap.js)
+  }
+  return out;
 }
 // w2r with its CAMR chunk replaced by these packets (none: removed).
 export function withCamChunk(w2r, packets) {
