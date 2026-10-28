@@ -201,6 +201,19 @@ Credits / legal
 Warcraft II is (c) Blizzard Entertainment. This is an unofficial, non-commercial fan tool for viewing your own
 games; it contains no game assets and requires a legitimately owned copy of the game.
 
+Voice (timeline and stats window)
+---------------------------------
+With CamRec microphone recordings, watching one player (the fog / player view choice) shows their voice above the
+timeline ("Voice" box): the bars are how loud they spoke, the colour how worked up they sounded compared with their
+own normal in this game (blue calmer, grey normal, orange to red worked up); a click goes there. The "Kmečometar"
+box shows an analog meter of how worked up the watched player (or, with fog "all", each team: two meters) sounds
+right now, from −2 R to +2 R (R: Rubelj; 0 = their own normal, 0 in silence). A rise above 0 is held 1.5 s and
+then falls back to 0 over 2 s; below 0 it shows the value of the moment. It sits under the score strip when there
+is room. The stats window's Voice tab charts it for every player: intensity from their pitch and
+loudness against their own average, and how many seconds a minute they talked. It shows how excited someone
+sounds, not why: it is no stress or lie detector. These are real people's voices: look at this only with their
+agreement. The analysis runs in the browser only; switch it off on the Voice tab (remembered in this browser).
+
 Live games
 ----------
 A game can be watched while it is played: one of the players' PCs runs the recorder in live/ (README.txt there)

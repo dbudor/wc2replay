@@ -80,6 +80,7 @@ import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, ou
 import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
 import { pickUnit, unitRef, refAlive, unitInfo, typeName, UPGRADE_NAMES } from './unitinfo.js';
+import { VoiceAnalysis, voiceSeries, voiceWave, intensityRgb, frameIntensity, lineChartSvg, WINDOW_S } from './voice.js';
 import { MatchStats, unitsHtml, killsHtml, stackChartSvg, smoothRate, minuteTotals, cost as unitCost, points as unitPoints, upgradeCost, isBuilding, fmtNum, UPGRADE_ICON } from './stats.js';
 import { Balloons, parseBalloons, balloonStub } from './balloons.js';
 import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visibleMessages, FRAME_W, FRAME_H, MAP_RECT, MINI_RECT } from './playerview.js';
@@ -164,6 +165,7 @@ function refreshCams() {
   st.mic = buildMicTracks(pk, st.cam.tracks);
   mic.setTracks(st.mic, st.tickMs || 1000 / 30);
   ui.micsBox.hidden = !mic.players.length;
+  $('waveBox').hidden = $('vuBox').hidden = ![...st.mic.values()].some(t => t.blocks && t.blocks.length);
 }
 function camNote() {
   const ign = st.cam.ignored && st.cam.ignored.length ? ` (ignored a camera of another map: player ${st.cam.ignored.map(p => p + 1).join(', ')})` : '';
@@ -481,7 +483,7 @@ async function startSession(intro) {
   st.match = parseMatch(picked.replay);
   st.tracker = new GameTracker(picked.replay);
   st.screen = null; st.outroClosed = false;
-  mstats.reset(); sw.icons.clear(); sw.key = '';   // a new replay (or rules): the match stats start over
+  mstats.reset(); sw.icons.clear(); sw.key = ''; voice.a = Object.assign(new VoiceAnalysis(), { onUpdate: voice.a.onUpdate }); voice.src = null;   // a new replay (or rules): the match stats start over
   await boot();
   const m = st.session.mem();
   st.tileset = loadTileset(n => st.mpq.read(n), m);
@@ -1014,7 +1016,7 @@ const watched = () => +ui.fog.value;
 function applyFog() { st.renderer.fogPlayer = st.noFog ? -1 : watched(); updateWatchButtons(); }
 ui.fog.onchange = () => {
   if (st.pv.on && +ui.fog.value < 0) ui.fog.value = String(pvPlayer());   // the player view always has a player
-  applyFog(); st.pv.cam.reset(); st.pv.camRec = true; st.pv.frame && (st.pv.frame.shown = null);
+  applyFog(); st.pv.cam.reset(); st.pv.camRec = true; st.pv.frame && (st.pv.frame.shown = null); drawWave(); vuUpdate();
   if (st.screen && st.screen.kind === 'outro') st.screen.t0 = performance.now();
 };
 // ---- player view on / off
@@ -1040,7 +1042,7 @@ function setPlayerView(on) {
   if (restore) {
     st.view.scale = st.freeCam.scale; centreOn(st.freeCam.x, st.freeCam.y);
     if ([...ui.fog.options].some(o => o.value === st.freeCam.fog)) { ui.fog.value = st.freeCam.fog; applyFog(); }
-  }
+  }  drawWave();
 }
 // The inspect card floats over the map, out of the players panel; on an upright phone it goes into the players sheet (the side panel is below the fold), and in the player view,
 // whose 4:3 screen is short, the side panel stays below it and holds the card.
@@ -1179,6 +1181,7 @@ function updateClock() {
   if (document.activeElement !== ui.seek) ui.seek.value = s.turn;
   seekFill();
   liveButton();
+  drawWave(); vuUpdate();
 }
 
 // ---------------------------------------------------------------- view
@@ -1618,7 +1621,7 @@ ui.score.addEventListener('click', e => {
 // / killed / researched.
 const mstats = new MatchStats();
 const sw = { el: $('statsWin'), body: $('statsBody'), tip: $('statsTip'), btn: $('statsBtn'), tab: 'units', last: 0, key: '', icons: new Map(), charts: null, hover: null };
-try { sw.tab = localStorage.getItem('w2v.statsTab') === 'kills' ? 'kills' : 'units'; } catch { /* private window */ }
+try { const t = localStorage.getItem('w2v.statsTab'); sw.tab = t === 'kills' || t === 'voice' ? t : 'units'; } catch { /* private window */ }
 const TEAM_RGB = [[106, 162, 255], [255, 107, 90]];   // teams: blue / red (players' own colours can be alike)
 const RES_RGB = [[232, 197, 71], [104, 170, 76], [140, 150, 170]], RES_NAME = ['gold', 'lumber', 'oil'], RES_W = [1, 3, 4], SCORE_RGB = [255, 255, 255];
 function setStats(on) {
@@ -1658,9 +1661,11 @@ function statsIcon(type, owner, upgrade = false) {
 function drawStats(force = false) {
   if (sw.el.hidden || !st.session || !st.tileset) return;
   const m = st.session.mem(), tick = st.session.tick, groups = statsGroups(m);
+  const vb = sw.el.querySelector('.statsTabs button[data-tab="voice"]'), hasMic = voiceTracks().size > 0;
+  vb.hidden = !hasMic; if (!hasMic && sw.tab === 'voice') sw.tab = 'units';
   for (const b of sw.el.querySelectorAll('.statsTabs button')) { const on = b.dataset.tab === sw.tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); }
   const bw = sw.body.clientWidth - 28, bh = sw.body.clientHeight - 28;
-  const key = `${sw.tab}|${tick}|${groups.map(g => g.members.join()).join('/')}|${bw}x${bh}`;
+  const key = `${sw.tab}|${tick}|${groups.map(g => g.members.join()).join('/')}|${bw}x${bh}${sw.tab === 'voice' ? `|${voice.on}|${voice.a.done}/${voice.a.total}` : ''}`;
   if (!force && key === sw.key) return;
   sw.key = key; sw.groups = groups; sw.tick = tick;
   const pinKey = `${sw.tab}|${groups.map(g => g.members.join()).join('/')}`;
@@ -1672,6 +1677,13 @@ function drawStats(force = false) {
     upName: id => UPGRADE_NAMES[id] || `upgrade ${id}`, building: t => isBuilding(m, t), cost: t => unitCost(m, t), upCost: id => upgradeCost(m, id),
     playerName: id => st.pv.names[id] || `Player ${id + 1}`, playerRgb: rgbOf, clock: k => fmtTime(k * st.tickMs) };
   let html;
+  if (sw.tab === 'voice') {
+    html = voiceHtml(groups, rgbOf, bw, bh);
+    if (html !== sw.body._html) { sw.body.innerHTML = sw.body._html = html; if (sw.hover) statsHover(sw.hover); }
+    const lg = $('statsLegend'), legend = voice.on ? groups.flatMap(g => g.members).filter(p => voiceTracks().has(p)).map(p => `<span class="key"><i style="background:rgb(${rgbOf(p)})"></i>${esc(st.pv.names[p] || `Player ${p + 1}`)}</span>`).join('') : '';
+    if (lg._html !== legend) lg.innerHTML = lg._html = legend;
+    return;
+  }
   if (sw.tab === 'units') {
     const alive = groups.map(() => new Map()), gOf = new Map(groups.flatMap((g, i) => g.members.map(p => [p, i])));
     const base = m.r32(A.Units), n = m.r32(A.UnitCount);
@@ -1754,6 +1766,190 @@ function statsCharts(m, o, groups, kinds, bw, bh) {
   }
   return `<div class="stCharts">${html}</div>`;
 }
+// ---- the Voice tab (voice.js), on unless switched off on that tab (remembered in this browser; off: nothing is analysed).
+// Per group a chart of each player's voice intensity (pitch and loudness against their own normal so far, in units
+// of their own spread) and one of how many seconds a minute each spoke, both over the 15 s around each point.
+const voice = { on: false, a: new VoiceAnalysis(), src: null, last: 0 };
+voice.on = true; try { voice.on = localStorage.getItem('w2v.voice') !== '0'; } catch { /* private window */ }
+voice.a.onUpdate = () => {
+  if (performance.now() - voice.last < 400 && !voice.a.ready) return;
+  voice.last = performance.now(); drawWave();
+  if (!sw.el.hidden && sw.tab === 'voice') drawStats(true);
+};
+const voiceTracks = () => new Map([...(st.mic || new Map())].filter(([, t]) => t.blocks && t.blocks.length));
+function setVoice(on) {
+  voice.on = on; try { localStorage.setItem('w2v.voice', on ? '1' : '0'); } catch { /* private window */ }
+  if (!on) { voice.a = Object.assign(new VoiceAnalysis(), { onUpdate: voice.a.onUpdate }); voice.src = null; }
+  drawStats(true); drawWave(); vuUpdate();
+}
+// the analysis follows the recordings (a live game's grow)
+function voiceEnsure() { if (voice.on && st.mic && voice.src !== st.mic) { voice.src = st.mic; voice.a.update(voiceTracks(), st.tickMs); } }
+function voiceHtml(groups, rgbOf, bw, bh) {
+  const tracks = voiceTracks(), name = p => st.pv.names[p] || `Player ${p + 1}`;
+  const about = `<p class="voiceAbout">How worked up each player sounds compared with their own normal in this game, from their microphone: ` +
+    `<b>intensity</b> is how far their pitch and loudness are above their own average (0: as usual for them; in units of their own spread, so a deep voice or a quiet headset does not count), ` +
+    `with how many seconds a minute they talked, both over ${WINDOW_S} s. It shows how excited someone sounds, not why: it is no stress or lie detector. ` +
+    `These are real people's voices: look at this only with their agreement.</p>`;
+  if (!voice.on) {
+    sw.charts = []; sw.charts.t = [];
+    return `<div class="voiceOpt">${about}<button class="voiceOnBtn">Analyse the voices</button><p class="voiceNote">The voice analysis is switched off in this browser (it runs in the browser only; nothing is sent anywhere).</p></div>`;
+  }
+  voiceEnsure();
+  const step = 5000 / st.tickMs, grid = []; for (let k = 0; k <= sw.tick; k += step) grid.push(Math.round(k));
+  if (!grid.length || grid[grid.length - 1] !== sw.tick) grid.push(sw.tick);
+  sw.charts = []; sw.charts.t = grid;
+  const h = Math.max(180, Math.min(300, Math.round(bh * .36))), lim = 3;
+  const ser = new Map([...tracks.keys()].map(p => [p, voiceSeries(voice.a.frames(p), grid, sw.tick, st.tickMs)]));
+  const fmtSt = v => Number.isFinite(v) ? `${v > -0.05 ? '+' : '−'}${Math.abs(v).toFixed(1)}` : '–';
+  let html = `<div class="stCharts">`, talkTop = 0;
+  const parts = groups.map(g => ({ g, ps: g.members.filter(p => tracks.has(p)) }));
+  for (const { ps } of parts) for (let i = 0; i < grid.length; i++) talkTop = Math.max(talkTop, ps.reduce((a, p) => a + ser.get(p).talk[i], 0));
+  for (const { g, ps } of parts) {
+    if (!ps.length) { html += `<div class="voiceNone">${esc(g.name)}: no microphone recorded</div>`; continue; }
+    const c = { title: `${g.name} · voice intensity (0 = their own normal)`, tip: ps.map(p => ({ rgb: rgbOf(p), label: name(p), fmt: i => { const s = ser.get(p); return Number.isFinite(s.intensity[i]) ? `${fmtSt(s.intensity[i])} (pitch ${fmtSt(s.pitch[i])} semitones, loudness ${fmtSt(s.loud[i])} dB, ${Math.round(s.talk[i])} s/min)` : s.talk[i] ? `${Math.round(s.talk[i])} s/min talking` : 'quiet'; } })) };
+    sw.charts.push(c);
+    html += `<div data-chart="${sw.charts.length - 1}">${lineChartSvg({ title: c.title, t: grid, lines: ps.map(p => ({ rgb: rgbOf(p), v: ser.get(p).intensity })), lim, w: bw, h, tickMs: st.tickMs,
+      labels: [[2, '+2'], [1, '+1'], [0, 'normal'], [-1, '−1'], [-2, '−2']] })}</div>`;
+  }
+  for (const { g, ps } of parts) {
+    if (!ps.length) continue;
+    const c = { title: `${g.name} · talking (seconds per minute)`, tip: ps.map(p => ({ rgb: rgbOf(p), label: name(p), v: ser.get(p).talk.map(Math.round) })) };
+    sw.charts.push(c);
+    html += `<div data-chart="${sw.charts.length - 1}">${stackChartSvg({ title: c.title, t: grid, pos: ps.map(p => ({ rgb: rgbOf(p), v: ser.get(p).talk })), neg: [],
+      line: null, range: { top: Math.max(10, talkTop), bottom: 0, lineTop: 0, lineBottom: 0 }, w: bw, h: Math.round(h * .7), tickMs: st.tickMs, yLabels: true })}</div>`;
+  }
+  const busy = voice.a.ready ? '' : ` Analysing… ${voice.a.done} of ${voice.a.total} recordings.`;
+  return html + `</div><div class="voiceFoot">${about}<p class="voiceNote">${busy} The analysis runs in this browser only; it also colours the waveform under the timeline. <button class="voiceOffBtn">Switch the voice analysis off</button> (remembered here)</p></div>`;
+}
+// The watched player's voice under the timeline: bars as loud as they spoke, coloured by how worked up they sounded
+// (intensityRgb: blue calmer, grey their normal, orange to red worked up); the part not yet played dimmed. Hidden with
+// no player watched (fog "all", free view), without their microphone, or with the voice analysis off.
+const wave = { el: $('voiceWave'), dataKey: '', key: '', data: null };
+const wavePlayer = () => watched() >= 0 ? watched() : st.pv.on ? pvPlayer() : -1;
+function drawWave() {
+  const p = st.session && voice.on && $('waveShow').checked ? wavePlayer() : -1, show = p >= 0 && voiceTracks().has(p);
+  if (wave.el.hidden === show) wave.el.hidden = !show;
+  if (!show) { wave.data = null; wave.key = ''; return; }
+  voiceEnsure();
+  const r = wave.el.getBoundingClientRect(); if (!r.width) return;
+  const d = window.devicePixelRatio || 1, W = Math.round(r.width * d), H = Math.round(r.height * d), L = Math.round(7 * d), cw = Math.max(1, Math.round(d)), n = Math.max(1, Math.floor((W - 2 * L) / cw));   // a column a CSS pixel
+  const max = +ui.seek.max || 1, cur = st.session.turn;
+  const dataKey = `${p}|${n}|${max}|${voice.a.done}/${voice.a.total}|${st.tickMs}`;
+  if (dataKey !== wave.dataKey) {
+    const edges = Array.from({ length: n + 1 }, (_, i) => tickAtTurn(Math.round(i * max / n)));
+    const fr = voice.a.frames(p);
+    wave.data = { ...voiceWave(fr, edges, Infinity, st.tickMs), n, max }; wave.dataKey = dataKey; wave.key = '';
+  }
+  const key = `${dataKey}|${W}x${H}|${cur}`; if (key === wave.key) return; wave.key = key;
+  const c = wave.el; if (c.width !== W) c.width = W; if (c.height !== H) c.height = H;
+  const g = c.getContext('2d'), { amp, intensity } = wave.data, mid = H / 2, playedTo = cur / max * n;
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(L, Math.floor(mid), n * cw, Math.max(1, Math.round(d / 2)));
+  for (let i = 0; i < n; i++) {
+    if (!amp[i]) continue;
+    const [R, G, B] = intensityRgb(intensity[i]), h = Math.max(d, amp[i] * (mid - d / 2));
+    g.fillStyle = `rgba(${R},${G},${B},${i <= playedTo ? 1 : 0.45})`; g.fillRect(L + i * cw, mid - h, cw, 2 * h);
+  }
+}
+wave.el.addEventListener('click', e => {   // a click on it goes there, as on the seek bar
+  if (!st.session || st.busy) return;
+  const r = wave.el.getBoundingClientRect(), t = clampTurn(Math.round((e.clientX - r.left - 7) / Math.max(1, r.width - 14) * (+ui.seek.max || 1)));
+  seekTip.hidden = true; ui.seek.value = t; seekTo(t);
+});
+new ResizeObserver(() => drawWave()).observe(ui.seek);
+// the checkboxes (remembered): the waveform on unless unticked, the Kmečometar off unless ticked
+for (const [id, k, def] of [['waveShow', 'w2v.wave', true], ['vuShow', 'w2v.vu', false]]) {
+  const el = $(id); el.checked = def;
+  try { const v = localStorage.getItem(k); if (v !== null) el.checked = v === '1'; } catch { /* private window */ }
+  el.addEventListener('change', () => { try { localStorage.setItem(k, el.checked ? '1' : '0'); } catch { /* private window */ } drawWave(); vuUpdate(); });
+}
+// ---- Kmečometar: an analog meter of how worked up the watched player (fog / player view) sounds now, else one meter
+// a team (its member furthest from their normal), in R (Rubelj) from −2 to +2: the frame intensity (frameIntensity:
+// against their whole-game normal, in units of their spread) furthest from 0 over the last 120 ms of game time, 0 in
+// silence. Positive values hold: the needle stays at a peak 1.5 s and then falls back to 0 over 2 s, unless it goes
+// higher meanwhile; below 0 (and once the peak is gone) it shows the value now. The needle has a little inertia
+// (~60 ms). Below the score strip when there is room (stacked), else at the bottom towards the centre (side by side).
+const VU_LIM = 2, VU_HOLD = 1500, VU_FALL = 2000, VU_DEG = 45, VU_W = 172, VU_CX = 86, VU_CY = 118, VU_R = 92;
+const vu = { el: $('vuPanel'), sig: '', meters: [], cache: new Map(), raf: 0, last: 0, placed: 0 };
+function vuFrames(p) {
+  const key = `${voice.a.done}/${voice.a.total}`, now = performance.now(); let c = vu.cache.get(p);   // while analysing: at most once a second
+  if (!c || c.key !== key && (voice.a.ready || now - c.made > 1000)) { const fr = voice.a.frames(p); vu.cache.set(p, c = { key, made: now, t: Float64Array.from(fr, f => f.t), v: frameIntensity(fr) }); }
+  return c;
+}
+function vuNow(p, tick) {
+  const { t, v } = vuFrames(p), from = tick - 120 / st.tickMs;
+  let lo = 0, hi = t.length; while (lo < hi) { const m = (lo + hi) >> 1; if (t[m] <= tick) lo = m + 1; else hi = m; }
+  let best = 0; for (let i = lo - 1; i >= 0 && t[i] > from; i--) if (Math.abs(v[i]) > Math.abs(best)) best = v[i];
+  return best;
+}
+const vuAngle = x => VU_DEG * Math.max(-1.08, Math.min(1.08, x / VU_LIM));   // a little past the end stops: pinned
+const vuPt = (deg, r) => [VU_CX + r * Math.sin(deg * Math.PI / 180), VU_CY - r * Math.cos(deg * Math.PI / 180)];
+function vuFace(rgb) {
+  const arc = (a, b, r) => { const [x0, y0] = vuPt(vuAngle(a), r), [x1, y1] = vuPt(vuAngle(b), r); return `M${x0.toFixed(1)} ${y0.toFixed(1)}A${r} ${r} 0 0 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`; };
+  let s = `<svg class="vuFace" viewBox="0 0 ${VU_W} 104"><rect x="1" y="1" width="${VU_W - 2}" height="102" rx="7" class="vuBg"/>` +
+    `<path d="${arc(-2, 2, VU_R)}" class="vuArc"/><path d="${arc(1, 2, VU_R - 3)}" class="vuHot"/><path d="${arc(-2, -1, VU_R - 3)}" class="vuCool"/>`;
+  for (let k = -4; k <= 4; k++) {
+    const a = vuAngle(k / 2), [x0, y0] = vuPt(a, VU_R), [x1, y1] = vuPt(a, VU_R + (k % 2 ? 5 : 9));
+    s += `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" class="vuTick"/>`;
+    if (!(k % 2)) { const [tx, ty] = vuPt(a, VU_R + 17); s += `<text x="${tx.toFixed(1)}" y="${(ty + 3).toFixed(1)}" class="vuNum${k > 0 ? ' hot' : ''}">${k > 0 ? '+' : k < 0 ? '−' : ''}${Math.abs(k / 2)}</text>`; }
+  }
+  s += `<text x="${VU_CX}" y="62" class="vuUnit">R</text><text x="${VU_CX}" y="78" class="vuBrand">Kmečometar</text>`;
+  s += `<g class="vuNd"><line x1="${VU_CX}" y1="${VU_CY}" x2="${VU_CX}" y2="${VU_CY - VU_R + 2}" class="vuNdBack"/><line x1="${VU_CX}" y1="${VU_CY}" x2="${VU_CX}" y2="${VU_CY - VU_R + 2}" stroke="rgb(${rgb})" class="vuNdFront"/></g>`;
+  return s + `<rect x="1" y="94" width="${VU_W - 2}" height="9" class="vuFoot"/></svg>`;
+}
+function vuUpdate() {
+  const tracks = st.session && voice.on && $('vuShow').checked ? voiceTracks() : new Map();
+  const groups = tracks.size ? statsGroups(st.session.mem()).map(g => ({ ...g, ps: g.members.filter(p => tracks.has(p)) })).filter(g => g.ps.length) : [];
+  vu.el.hidden = !groups.length;
+  if (!groups.length) { cancelAnimationFrame(vu.raf); vu.raf = 0; vu.sig = ''; return; }
+  voiceEnsure();
+  const sig = groups.map(g => `${g.name}:${g.ps.join()}:${g.rgb}`).join('/');
+  if (sig !== vu.sig) {
+    vu.sig = sig;
+    vu.el.innerHTML = groups.map(g => `<div class="vuMeter">${vuFace(g.rgb)}<div class="vuLegend"><span><i style="background:rgb(${g.rgb})"></i>${esc(g.name)} <b>0.0 R</b></span></div></div>`).join('');
+    const els = vu.el.querySelectorAll('.vuMeter');
+    vu.meters = groups.map((g, i) => ({ ps: g.ps, nd: els[i].querySelector('.vuNd'), txt: els[i].querySelector('.vuLegend b'), x: 0, held: 0, at: 0, shown: '' }));
+    vu.el._k = null; placeVu();
+  }
+  if (!vu.raf) vu.raf = requestAnimationFrame(vuTick);
+}
+// below the score strip (as wide, meters stacked) when it is shown and nothing is under it down to the timeline,
+// else bottom centre, side by side
+function placeVu() {
+  if (vu.el.hidden) return;
+  const sc = ui.score, par = vu.el.offsetParent; let css = '';
+  if (sc.offsetParent && par && !st.pv.on && !narrow.matches) {
+    const pr = par.getBoundingClientRect(), r = sc.getBoundingClientRect(), sr = ui.side.getBoundingClientRect();
+    const top = r.bottom + 8, need = vu.meters.length * (r.width * 104 / VU_W + 30) + 10;
+    const floor = ui.controls.hidden || document.body.classList.contains('seek-hide') ? pr.bottom - 12 : ui.controls.getBoundingClientRect().top - 10;
+    const sideUnder = sr.width && sr.bottom > top && sr.right > r.left && sr.left < r.right;
+    if (!sideUnder && top + need <= floor) css = `left: ${r.left - pr.left}px; top: ${top - pr.top}px; bottom: auto; transform: none; width: ${r.width}px; flex-direction: column;`;
+  }
+  if (vu.el._k !== css) { vu.el.style.cssText = css; vu.el._k = css; }
+}
+function vuTick(now) {
+  vu.raf = 0; if (vu.el.hidden || !st.session) return;
+  const dt = Math.min(100, now - (vu.last || now)); vu.last = now;
+  if (now - vu.placed > 500) { vu.placed = now; placeVu(); }
+  const tick = st.session.tick;
+  for (const n of vu.meters) {
+    let y = 0; for (const p of n.ps) { const v = vuNow(p, tick); if (Math.abs(v) > Math.abs(y)) y = v; }
+    const age = now - n.at, pk = age <= VU_HOLD ? n.held : n.held * Math.max(0, 1 - (age - VU_HOLD) / VU_FALL);
+    if (y > 0 && y >= pk) { n.held = y; n.at = now; }
+    const want = Math.max(y, pk) > 0 ? Math.max(y, pk) : y;   // a positive peak while it lasts, else the value now
+    n.x += (want - n.x) * (1 - Math.exp(-dt / 60));
+    const k = `${vuAngle(n.x).toFixed(1)}|${want.toFixed(1)}`;
+    if (k === n.shown) continue; n.shown = k;
+    const [a, txt] = k.split('|');
+    n.nd.setAttribute('transform', `rotate(${a} ${VU_CX} ${VU_CY})`);
+    n.txt.textContent = `${+txt > 0 ? '+' : +txt < 0 ? '−' : ''}${Math.abs(+txt).toFixed(1)} R`;
+  }
+  vu.raf = requestAnimationFrame(vuTick);
+}
+sw.body.addEventListener('click', e => {
+  if (e.target.closest('.voiceOnBtn')) setVoice(true);
+  else if (e.target.closest('.voiceOffBtn')) setVoice(false);
+});
 // Pointing at an icon, or a click on it (on and off; phones have no pointing): marks on the time axis of that group's
 // charts, when those were made (up) and lost / killed (down; red). mk: the icon's data-mk (u:group:type,
 // k:group:type:victims' player, r:group:tick), or null to clear.
@@ -1792,7 +1988,7 @@ function statsHover(h) {
   const x = L + W * t[i] / tmax, cur = svg.querySelector('.cur');
   cur.setAttribute('x1', x); cur.setAttribute('x2', x); cur.setAttribute('visibility', 'visible');
   sw.tip.innerHTML = `<div class="t">${esc(ch.title)} · ${fmtTime(t[i] * st.tickMs)}</div>` +
-    ch.tip.map(s => `<div><i style="background:rgb(${s.rgb})"></i>${esc(s.label)}: <b>${fmtNum(s.v[i])}</b></div>`).join('');
+    ch.tip.map(s => `<div><i style="background:rgb(${s.rgb})"></i>${esc(s.label)}: <b>${s.fmt ? esc(s.fmt(i)) : fmtNum(s.v[i])}</b></div>`).join('');
   sw.tip.hidden = false;
   const wr = sw.el.getBoundingClientRect(), tw = sw.tip.offsetWidth, th = sw.tip.offsetHeight;
   let lx = h.x - wr.left + 14, ly = h.y - wr.top + 14;
@@ -1827,7 +2023,7 @@ function placeSides() {
   placeHud();
 }
 function placeHud() {
-  if (narrow.matches || st.pv.on) { ui.side.style.cssText = ui.score.style.cssText = ''; ui.side._k = ui.score._k = ''; return; }
+  if (narrow.matches || st.pv.on) { ui.side.style.cssText = ui.score.style.cssText = ''; ui.side._k = ui.score._k = ''; placeVu(); return; }
   const flip = document.body.classList.contains('flip'), near = flip ? 'right' : 'left', far = flip ? 'left' : 'right';
   const panel = !document.body.classList.contains('sideMin'), Hs = ui.score.offsetHeight;   // 0 while hidden
   // desktop: the buttons are a row above the minimap; a phone on its side has them as a column along the edge, so the
@@ -1840,6 +2036,7 @@ function placeHud() {
   set(ui.side, `${near}: ${x0}px; ${far}: auto; top: ${top}px; max-height: ${Math.max(col ? 80 : 120, bottom - top)}px;`);
   set(ui.score, `${near}: ${stack ? x0 : x0 + sw + 8}px; ${far}: auto;`);
   hudW = Math.max(miniCard.offsetWidth, x0 - 12 + (stack ? Math.max(sw, cw) : sw + 8 + cw));
+  placeVu();
 }
 // ---- the players panel can be folded away (Y, or its button above the minimap); remembered per browser
 // Panel / score strip / minimap choices are remembered per mode (desktop, upright phone '.p', phone on its side '.ls');

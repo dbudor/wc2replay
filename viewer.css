@@ -180,7 +180,9 @@ body.noScore .score { display: none !important; }
 #seekBtn[data-mode=show] { background: var(--accent); color: #1a1408; border-color: transparent; }
 #seekBtn[data-mode=hide]::after { content: ""; position: absolute; width: 22px; height: 2px; background: currentColor; transform: rotate(-45deg); }
 #controls { left: 12px; right: 12px; bottom: 12px; padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
-.timeline { position: relative; height: 18px; display: flex; align-items: center; }
+.timeline { position: relative; display: flex; flex-direction: column; }
+.voiceWave { display: block; width: 100%; height: 16px; margin-bottom: 2px; cursor: pointer; }
+.voiceWave[hidden] { display: none; }
 #seek { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; margin: 0; background: transparent; cursor: pointer; --p: 0%; }
 #seek::-webkit-slider-runnable-track { height: 5px; border-radius: 3px; background: linear-gradient(90deg, var(--accent) var(--p), rgba(255, 255, 255, .16) var(--p)); }
 #seek::-moz-range-track { height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .16); }
@@ -191,7 +193,7 @@ body.noScore .score { display: none !important; }
 #seek:hover::-webkit-slider-runnable-track { height: 7px; }
 #seek:hover::-webkit-slider-thumb { transform: scale(1.15); margin-top: -3.5px; }
 /* the time under the pointer / thumb while seeking */
-.seekTip { position: absolute; bottom: 20px; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; pointer-events: none;
+.seekTip { position: absolute; bottom: calc(100% + 2px); transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; pointer-events: none;
   background: rgba(10, 12, 16, .92); border: 1px solid var(--edge); color: var(--text); font-size: 12px; font-weight: 600; line-height: 1.2;
   font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 4px 12px #0007; }
 .clock { cursor: text; border-radius: 6px; padding: 1px 4px; margin: -1px -4px; }
@@ -469,3 +471,37 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
 .liveBtn::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 0; }
 .liveBtn.edge { background: #c62828; color: #fff; }
 .liveBtn.done { background: rgba(255, 255, 255, .08); }
+
+/* stats window: Voice tab (opt-in) */
+.voiceOpt { max-width: 640px; margin: 24px auto; text-align: center; }
+.voiceAbout { color: var(--muted); line-height: 1.45; margin: 0 0 12px; text-align: left; }
+.voiceFoot { margin-top: 12px; }
+.voiceFoot .voiceAbout { font-size: 12px; }
+.voiceNote { color: var(--muted); font-size: 12px; }
+.voiceOnBtn, .voiceOffBtn { font: inherit; border: 1px solid rgba(255, 255, 255, .25); background: rgba(255, 255, 255, .1); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.voiceOffBtn { padding: 2px 8px; font-size: 12px; }
+.voiceNone { color: var(--muted); padding: 8px 0; }
+.statsTabs button[hidden] { display: none; }
+
+/* ---- Kmečometar: an analog meter (−2 R .. +2 R), a needle for the watched player or each team; viewer.js placeVu */
+.vuPanel { position: absolute; left: 50%; transform: translateX(-50%); bottom: var(--hud-b); z-index: 3; padding: 5px; pointer-events: none; box-sizing: border-box;
+  display: flex; gap: 8px; }
+.vuPanel:not([style*="width"]) .vuMeter { width: 162px; }
+.vuMeter { flex: 1 1 0; min-width: 0; }
+.vuFace { display: block; width: 100%; height: auto; }
+.vuFace .vuBg { fill: #efe2bf; stroke: #6d5a33; stroke-width: 1.5; }
+.vuFace .vuFoot { fill: #2a2418; }
+.vuFace .vuArc { fill: none; stroke: #2a2418; stroke-width: 1.2; }
+.vuFace .vuHot { fill: none; stroke: #c8321e; stroke-width: 5; }
+.vuFace .vuCool { fill: none; stroke: #4a78c0; stroke-width: 5; }
+.vuFace .vuTick { stroke: #2a2418; stroke-width: 1.2; }
+.vuFace .vuNum { font: 700 9px system-ui, sans-serif; fill: #2a2418; text-anchor: middle; }
+.vuFace .vuNum.hot { fill: #b02a18; }
+.vuFace .vuUnit { font: 700 15px Georgia, serif; fill: #2a2418; text-anchor: middle; }
+.vuFace .vuBrand { font: italic 600 9px Georgia, serif; fill: #6d5a33; text-anchor: middle; letter-spacing: .04em; }
+.vuFace .vuNdBack { stroke: #1a1408; stroke-width: 3; stroke-linecap: round; }
+.vuFace .vuNdFront { stroke-width: 1.5; stroke-linecap: round; }
+.vuLegend { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px; margin-top: 4px; font-size: 11px; font-weight: 600; }
+.vuLegend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.vuLegend i { width: 8px; height: 8px; border-radius: 2px; }
+.vuLegend b { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; min-width: 34px; }
