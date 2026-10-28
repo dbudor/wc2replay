@@ -70,6 +70,8 @@ import { MpqArchive, MpqSet } from './mpq.js';
 import { bootFileNames } from './files.js';
 import { SimSession, compileSim, convertDetectRules, w2rTurnTicks } from './sim.js';
 import { parseCapture, convertCapture, CaptureError, crc32, withLocalQuit } from './pcap.js';
+import { RULES, pluginInfo } from './plugins.js';
+import { LiveSource, listLive, relayBase } from './livesrc.js';
 import { loadTileset } from './tileset.js';
 import { MapRenderer, FogTracker } from './render.js';
 import { readUnits, readPlayers, tickMs, A } from './gamestate.js';
@@ -99,9 +101,10 @@ const ui = { status: $('status'), controls: $('controls'), play: $('play'), step
   peerBox: $('peerBox'), peer: $('peer'), save: $('save'), share: $('share'), shareBox: $('shareBox'), pauseAfter: $('pauseAfter'), rules: $('rules'),
   pview: $('pview'), follow: $('follow'), fogBtn: $('fogBtn'), micLink: $('micLink'), viewOpts: $('viewOpts'), viewRow: $('viewRow'), pvSlot: $('pvSlot'),
   camShow: $('camShow'), camBox: $('camBox'), inputShow: $('inputShow'), inputBox: $('inputBox'), micsBox: $('micsBox'), mics: $('mics'), micVol: $('micVol'), talkers: $('talkers'), listBox: $('listBox'), replayList: $('replayList'), inspect: $('inspect'),
-  score: $('score'), bar: $('bar'), side: $('side'), sideOpen: $('sideOpen'), toast: $('toast') };
+  score: $('score'), bar: $('bar'), side: $('side'), sideOpen: $('sideOpen'), toast: $('toast'), liveBtn: $('liveBtn') };
 
 const picked = { exe: null, dat: null, patch: null, replay: null, replayName: '', puds: new Map(), plugin: null,   // plugin: pluginInfo()
+  live: null,      // a live game (livesrc.js LiveSource): replay is its stream so far
   capture: null, captureName: '', converted: null,
   camCapture: [], camFiles: [], balloons: null };   // CamRec packets: from the capture, from dropped .w2c files   // capture: parseCapture result; converted: { peer, w2r, name }
 const st = {
@@ -136,21 +139,6 @@ const setStatus = (msg, err = false) => {
 // every sync byte the capture carries. Rules that only change scores or what an invisible unit's enemies see cannot
 // be told apart by the sync bytes: the game folder's plugin decides those. A .w2r keeps the rules it was converted
 // with (MTCH), unless overridden here.
-const RULES = { 0: 'original rules', 0x100: 'Peon2k 0.2.2 rules', 0x200: 'Peon2k 0.2.3 rules', 0x500: 'Peon2k 0.2.2.1 rules',
-  0xd00: 'Peon2k 0.2.2.1 vision rules', 0x600: 'Peon2k 0.2.3.1 rules', 0xe00: 'Peon2k 0.2.3.1 vision rules' };
-const PLUGIN_BUILDS = { 0xefea1697: 0x100, 0x86b57ae2: 0x200,   // CRC-32 of the released peon2k.w2p / peon2kvision.w2p files
-  0x85197383: 0x500, 0xa95308f6: 0xd00, 0x5b73c898: 0x600, 0x4f1681a2: 0xe00 };
-function pluginInfo(bytes, name) {
-  const bits = PLUGIN_BUILDS[crc32(bytes)] || 0;
-  let wav = null;                                  // the plugin's embedded PEON2K\ajmoo.wav (it writes it out at startup)
-  for (let i = 0; i + 12 <= bytes.length; i++) {
-    if (bytes[i] === 0x52 && bytes[i + 1] === 0x49 && bytes[i + 2] === 0x46 && bytes[i + 3] === 0x46 && bytes[i + 8] === 0x57 && bytes[i + 9] === 0x41) {
-      const n = (bytes[i + 4] | bytes[i + 5] << 8 | bytes[i + 6] << 16 | bytes[i + 7] << 24) >>> 0;
-      if (i + 8 + n <= bytes.length) { wav = bytes.slice(i, i + 8 + n); break; }
-    }
-  }
-  return { name, bits, wav };
-}
 function setPlugin(info) {
   picked.plugin = info;
   audio.setExtraFile(ALT_SOUND, info && info.wav);
@@ -222,13 +210,13 @@ async function addFiles(list) {
     if (n.endsWith('.exe')) picked.exe = await buf();
     else if (n === 'war2dat.mpq') picked.dat = await buf();
     else if (n === 'war2patch.mpq') picked.patch = await buf();
-    else if (/\.w2r(\.gz)?$/.test(n)) { picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.listName = f.listName || null; newGame = true; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
+    else if (/\.w2r(\.gz)?$/.test(n)) { stopLive(); picked.replay = await gunzipIf(await buf()); picked.replayName = f.name; picked.listName = f.listName || null; newGame = true; picked.capture = null; picked.converted = null; picked.camCapture = []; newCapture = null; }
     else if (n.endsWith('.pud')) picked.puds.set(n, await buf());
     else if (n.endsWith('.w2p')) { setPlugin(pluginInfo(await buf(), f.name)); onlyPlugin = true; continue; }
     else if (/\.(pcapng|pcap|cap)$/.test(n)) {
       const b = await buf();
       try { newCapture = parseCapture(b); } catch (e) { reportError(e, f.name); return; }
-      picked.camCapture = camPacketsFromCapture(b); newGame = true;
+      stopLive(); picked.camCapture = camPacketsFromCapture(b); newGame = true;
       picked.capture = newCapture; picked.captureName = f.name; picked.listName = f.listName || null; picked.converted = null; picked.replay = null;
     }
     else if (n.endsWith('.mpq') && !picked.dat) picked.dat = await buf();
@@ -252,6 +240,7 @@ async function addFiles(list) {
   }
   if (newCapture) fillPeers(newCapture);
   ui.peerBox.hidden = !picked.capture || !urlParams.has('advanced');
+  if (picked.pendingLive && picked.exe && picked.dat && !picked.replay && !picked.capture) { openLive(picked.pendingLive.relay, picked.pendingLive.id); return; }
   const missing = [!picked.exe && 'Warcraft II BNE.exe', !picked.dat && 'War2Dat.mpq', !picked.replay && !picked.capture && 'a .w2r replay or a capture'].filter(Boolean);
   if (missing.length) { setStatus(`Still needed: ${missing.join(', ')}.`); return; }
   try {
@@ -389,6 +378,7 @@ async function refreshReplayList() {
   for (const e of replayIndex) sel.add(new Option(`${e.name}${e.size ? ' · ' + kb(e.size) : ''}`, e.name));
   sel.value = replayIndex.some(e => e.name === keep) ? keep : '';
   ui.listBox.hidden = false;
+  addLiveOptions();
 }
 // A gzipped file (.w2r.gz; magic 1f 8b) inflated, anything else as it is (a host may have inflated it already)
 async function gunzipIf(b) {
@@ -447,8 +437,9 @@ async function loadFromList(name) {
 ui.replayList.onchange = async () => {
   const n = ui.replayList.value; if (!n) return;
   document.body.classList.remove('menuOpen');
+  if (n.startsWith('live:')) { const g = liveGames[+n.slice(5)]; if (g) openLive(g.relay, g.id); return; }
   ui.replayList.disabled = true;
-  try { await loadFromList(n); } catch (e) { reportError(e); }
+  try { stopLive(); await loadFromList(n); } catch (e) { reportError(e); }
   ui.replayList.disabled = false;
 };
 refreshReplayList();
@@ -485,7 +476,7 @@ async function start({ intro = false } = {}) {
   try { await startSession(intro); } finally { st.loading = false; }
 }
 async function startSession(intro) {
-  st.totalTurns = replayTurnCount(picked.replay);
+  st.totalTurns = liveTurns() ?? replayTurnCount(picked.replay);
   st.turnTicks = w2rTurnTicks(picked.replay); st.dumps.clear(); st.dumpBase = null;   // a new replay (or rules): new dumps
   st.match = parseMatch(picked.replay);
   st.tracker = new GameTracker(picked.replay);
@@ -614,6 +605,101 @@ $('share').onclick = async () => {
 };
 // rules= (the Rules selector is hidden): one of its values, else auto
 if (urlState.get('rules') && [...ui.rules.options].some(o => o.value === urlState.get('rules'))) ui.rules.value = urlState.get('rules');
+// ---------------------------------------------------------------- live games (w2live, web/live/; livesrc.js)
+// A recorder on a game PC (web/live/w2live.mjs) converts the game while it is played and pushes it to a relay
+// (relay.mjs, or the Cloudflare Worker worker.js); the viewer reads it from there. Relays: ?relay=URL[,URL...],
+// relays.json next to the viewer ({"relays": [URL...]}), and the viewer's own server when it is one (relay.mjs
+// --viewer). Their games are listed at the top of the replay list; picking one (or a link with live=<id>) starts it
+// at its newest turn and plays on as turns arrive. The LIVE button jumps back to the newest turn.
+let liveRelayList = null, liveGames = [];
+async function liveRelays() {
+  if (liveRelayList) return liveRelayList;
+  const out = new Set((urlParams.get('relay') || '').split(',').map(x => x.trim()).filter(Boolean).map(relayBase));
+  if (/^https?:$/.test(location.protocol)) {
+    try { const r = await fetch('relays.json', { cache: 'no-store' }); if (r.ok) for (const u of (await r.json()).relays || []) if (typeof u === 'string') out.add(relayBase(u)); } catch { /* none */ }
+    out.add(location.origin);   // relay.mjs --viewer: the relay is the viewer's own server
+  }
+  return liveRelayList = [...out];
+}
+async function refreshLive() {
+  const found = [];
+  for (const r of await liveRelays()) {
+    try { found.push(...(await listLive(r)).filter(g => !g.done || Date.now() - (g.updated || 0) < 6 * 3600e3)); }
+    catch { /* not a relay / unreachable */ }
+  }
+  liveGames = found;
+  addLiveOptions();
+}
+function addLiveOptions() {
+  const sel = ui.replayList, keep = sel.value;
+  for (const o of [...sel.querySelectorAll('optgroup.live')]) o.remove();
+  if (!liveGames.length) return;
+  const g = document.createElement('optgroup'); g.className = 'live'; g.label = 'Live games';
+  const hm = t => t ? new Date(t).toTimeString().slice(0, 5) : '';
+  liveGames.forEach((x, i) => g.appendChild(new Option(`${x.done ? '' : '● '}${x.title ? x.title + ': ' : ''}${x.map || x.id} · ${(x.players || []).join(', ')} · ${x.done ? 'ended' : 'live'}${x.started ? ' since ' + hm(x.started) : ''}`, `live:${i}`)));
+  sel.insertBefore(g, sel.options[1] || null);
+  ui.listBox.hidden = false;
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
+setInterval(() => { if (!document.hidden) refreshLive(); }, 20000);
+function stopLive() { if (picked.live) { picked.live.stop(); picked.live = null; } ui.liveBtn.hidden = true; }
+const liveTurns = () => picked.live ? (picked.live.ended ? replayTurnCount(picked.live.bytes) : picked.live.turns) : null;
+async function openLive(relay, id) {
+  stopLive();
+  if (!picked.exe || !picked.dat) { picked.pendingLive = { relay, id }; setStatus('This is a live game: pick the game files first (Warcraft II BNE.exe, War2Dat.mpq).'); return; }
+  picked.pendingLive = null;
+  const src = new LiveSource(relay, id);
+  picked.live = src; src.onData = () => liveData(src); src.start();
+  setStatus(`Live game ${id}: waiting for ${relay}…`);
+  try {
+    await src.ready();
+    if (picked.live !== src) return;
+    Object.assign(picked, { replay: src.bytes, replayName: `live: ${id}`, listName: null, capture: null, converted: null, camCapture: [], balloons: null });
+    await start({ intro: false });
+    if (picked.live === src && !src.done && st.totalTurns > 1) { await seekTo(clampTurn(st.totalTurns - 1)); setPlaying(true); }
+  } catch (e) { if (picked.live === src) { stopLive(); reportError(e); } }
+}
+// new bytes of the live game: the turns, times, who quit and the cameras grow; playback goes on if it waited
+let liveCamT = 0;
+function liveData(src) {
+  if (src !== picked.live) return;
+  if (src.error && !src.running) setStatus(`Live game: ${src.error}`, true);
+  if (!src.headReady || !st.session || st.loading) return;
+  picked.replay = src.bytes;
+  st.totalTurns = liveTurns();
+  ui.seek.max = Math.max(1, st.totalTurns - 1);
+  st.turnTicks = w2rTurnTicks(picked.replay);
+  if (st.tracker) st.tracker.scan(picked.replay);
+  if (performance.now() - liveCamT > 5000 || src.done) { liveCamT = performance.now(); refreshCams(); }
+  liveButton();
+}
+// the LIVE button: red at the newest turn, else how far behind it the view is (click: go there)
+function liveButton() {
+  const src = picked.live, b = ui.liveBtn;
+  if (!src || !st.session) { if (!b.hidden) b.hidden = true; return; }
+  b.hidden = false;
+  const tt = st.turnTicks, edge = tt && tt.length ? tt[tt.length - 1] : st.session.tick, behind = Math.max(0, (edge - st.session.tick) * st.tickMs);
+  const atEdge = !src.done && behind < 4000, txt = src.done ? 'ENDED' : atEdge ? 'LIVE' : `LIVE −${fmtTime(behind)}`;
+  if (b._t !== txt) { b._t = txt; b.textContent = txt; }
+  b.classList.toggle('edge', atEdge); b.classList.toggle('done', src.done);
+  b.title = src.done ? 'The live game has ended: all of it is here' : `A live game${src.readyIn ? ` (shown ${src.readyIn} s late: the relay's delay)` : ''}. Click to go to the newest turn${src.error ? ` · ${src.error}` : ''}`;
+}
+ui.liveBtn.onclick = async () => {
+  if (!st.session || st.busy || !picked.live) return;
+  closeScreen();
+  const to = clampTurn(st.totalTurns - 1);
+  if (to > st.session.turn) await seekTo(to);
+  setPlaying(true);
+};
+// live=<id>[&relay=<url>]: that game, from the given relay or the first that has it
+if (urlParams.get('live')) (async () => {
+  await autoGame;
+  const id = urlParams.get('live'); let relay = urlParams.get('relay') && relayBase(urlParams.get('relay').split(',')[0]);
+  if (!relay) { await refreshLive(); relay = (liveGames.find(g => g.id === id) || {}).relay; }
+  if (!relay) { setStatus(`Live game ${id}: no relay has it (add &relay=URL to the link).`, true); return; }
+  await openLive(relay, id);
+})();
+refreshLive();
 // a shared link: load its replay from the list once the game files and the list are there
 if (urlState.get('replay')) (async () => {
   if (urlState.get('pause') !== null || urlState.get('turn') && urlState.get('turn') !== '0') {   // nothing shows before the jump / Play
@@ -709,13 +795,14 @@ function drawScreen(ctx, W, H) {
 async function boot() {
   let pud = null;
   const rules = !picked.converted && ui.rules.value !== 'auto' ? +ui.rules.value : null;   // null: as converted / the .w2r says
-  const probe = await SimSession.boot({ module: st.module, exe: picked.exe, files: st.files, replay: picked.replay, pud: null, rules }).catch(e => e);
+  const source = picked.live ? (src => () => src.bytes)(picked.live) : undefined;   // live: turns are fed as they arrive
+  const probe = await SimSession.boot({ module: st.module, exe: picked.exe, files: st.files, replay: picked.replay, pud: null, rules, source }).catch(e => e);
   if (!(probe instanceof Error)) { attach(probe); return; }
   if (!/custom map/.test(probe.message)) throw probe;
   const want = /custom map (.*)$/.exec(probe.message)[1].replace(/^.*[\\/]/, '').toLowerCase();
   pud = picked.puds.get(want) || (await fetchMap(want))?.[1] || [...picked.puds.values()][0];
   if (!pud) throw new Error(`This replay uses the custom map “${want}”: add that .pud file, or put it in the viewer's maps/ folder.`);
-  attach(await SimSession.boot({ module: st.module, exe: picked.exe, files: st.files, replay: picked.replay, pud, rules }));
+  attach(await SimSession.boot({ module: st.module, exe: picked.exe, files: st.files, replay: picked.replay, pud, rules, source }));
 }
 function attach(s) {
   st.session = s;
@@ -759,6 +846,7 @@ function stepTurn() {
   const s = st.session;
   if (s.ended) return false;
   const r = s.step();
+  st.liveWait = r === -2; if (st.liveWait) return false;   // live: the next turn has not arrived yet
   st.fog.update(s.mem());
   st.tracker.after(s.mem(), s.turn - 1, s.tick);
   if (s.ended && st.cam.tracks.size) st.tracker.afterEnd(s.tick, new Map([...st.cam.tracks].map(([p, tr]) => [p, tr.endTick])));
@@ -790,7 +878,7 @@ async function seekTo(turn, progress = null) {
     st.outroClosed = false;
     if (turn === 0) { st.busy = false; maybeLobby(); return; }
     let t0 = performance.now();
-    while (st.session.turn < turn && !st.session.ended) {
+    while (st.session.turn < turn && !st.session.ended && !st.liveWait) {
       for (let k = 0; k < 500 && st.session.turn < turn && stepTurn(); k++);
       if (st.session.mismatch && st.session.fromDump) { await boot(); st.seekGoal.from = 0; continue; }   // a bad dump: from the start
       if (performance.now() - t0 > 30) { updateClock(); if (progress) progress(st.session.turn / turn); await new Promise(r => setTimeout(r, 0)); t0 = performance.now(); }
@@ -1090,6 +1178,7 @@ function updateClock() {
   if (html !== ui.clock._html) ui.clock.innerHTML = ui.clock._html = html;
   if (document.activeElement !== ui.seek) ui.seek.value = s.turn;
   seekFill();
+  liveButton();
 }
 
 // ---------------------------------------------------------------- view

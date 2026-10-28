@@ -200,3 +200,11 @@ Credits / legal
 ---------------
 Warcraft II is (c) Blizzard Entertainment. This is an unofficial, non-commercial fan tool for viewing your own
 games; it contains no game assets and requires a legitimately owned copy of the game.
+
+Live games
+----------
+A game can be watched while it is played: one of the players' PCs runs the recorder in live/ (README.txt there)
+and sends the game to a relay. Live games are listed at the top of the Replay list (the relays come from
+relays.json next to the viewer, {"relays": ["https://..."]}, or ?relay=URL in the address). A live game starts
+at its newest turn and plays on as turns arrive; the LIVE button is red at the newest turn, else it shows how far
+behind the view is and goes there when clicked. Everything else works as in a replay.

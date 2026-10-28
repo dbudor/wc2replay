@@ -39,6 +39,40 @@ export async function fixtx(opts) {
   }
 }
 
+// The -fixtx pass turn by turn (livecap.js LiveRecorder), in its own instance. create({ module, exe, files, head, pud }):
+// head = the raw .w2r's header chunks (MTCH, PUD). turn(chunk) runs one raw TURN chunk and returns its status
+// (0 ok; anything else: the game is over, feed no more); end(nturns) writes the turns held back and END;
+// take() returns the fixed file's bytes made since the last take.
+export class LiveFixtx {
+  static async create({ module, exe, files, head, pud }) {
+    const s = await SimSession._instance(module), X = s.X, f = new LiveFixtx();
+    X.w2w_init();
+    const rc = X.w2w_load_exe(s.put(exe), exe.length);
+    if (rc) throw new Error(`w2w_load_exe failed (${rc}): not Warcraft II BNE 2.02?`);
+    for (const [name, data] of files) X.w2w_vfs_add(s.putStr(name), s.put(data), data.length);
+    f.s = s; f.X = X; f.cap = 1 << 20; f.outP = X.w2w_malloc(f.cap); f.inCap = 1 << 16; f.inP = X.w2w_malloc(f.inCap);
+    const st = X.w2w_lfx_begin(s.put(head), head.length, pud ? s.put(pud) : 0, pud ? pud.length : 0, f.outP, f.cap);
+    if (st) throw new Error(['', 'fixtx: not a .w2r', 'fixtx: the custom map is missing or does not match', 'fixtx: lobby boot failed'][-st] || `fixtx failed (${st})`);
+    return f;
+  }
+  turn(chunk) {
+    if (chunk.length > this.inCap) throw new Error(`a turn of ${chunk.length} bytes`);
+    new Uint8Array(this.X.memory.buffer).set(chunk, this.inP);
+    return this.X.w2w_lfx_turn(this.inP, chunk.length);
+  }
+  end(nturns) { this.X.w2w_lfx_end(nturns); }
+  take() {
+    const n = this.X.w2w_lfx_take() >>> 0;
+    if (n > this.cap) throw new Error(`fixtx: ${n} bytes in one go`);
+    return new Uint8Array(this.X.memory.buffer, this.outP, n).slice();
+  }
+  stats() {
+    const v = new Int32Array(this.X.memory.buffer, this.X.w2w_lfx_stats(), FIXTX_FIELDS.length), o = {};
+    FIXTX_FIELDS.forEach((k, i) => { o[k] = i ? v[i] >>> 0 : v[i]; });
+    return o;
+  }
+}
+
 // Capture -> .w2r under the first of `candidates` (War2Combat plugin rule bits, e.g. [0, 0x100, 0x200]) with which
 // the game replays clean: after fixtx, no TX (sync byte) / hash / tick mismatch and the game runs to the capture's
 // last turn (wrong rules desync or reach "game over" early). fixtx's own TX count is no measure: it runs the
@@ -72,6 +106,18 @@ export function w2rTurnTicks(b) {
     o += 8 + len;
   }
   return any ? Uint32Array.from(out) : null;
+}
+// Length of a .w2r's header (up to its first TURN / END chunk); 0 while the stream does not have all of it.
+export function w2rHeadLength(b) {
+  const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let o = 8; o + 8 <= b.length;) {
+    const tag = String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]), len = dv.getUint32(o + 4, true);
+    if (tag === 'TURN' || tag === 'END ') return o;
+    if (tag !== 'MTCH' && tag !== 'PUD ' && tag !== 'POKE') return o;
+    o += 8 + len;
+    if (o > b.length) return 0;
+  }
+  return 0;
 }
 // Turn count of a .w2r ("W2R1", u32 version, chunks {u32 tag, u32 len, data}; END = u32 turn count).
 export function w2rTurnCount(b) {
@@ -112,8 +158,13 @@ export class SimSession {
     const rc = X.w2w_load_exe(s.put(opts.exe), opts.exe.length);
     if (rc) throw new Error(`w2w_load_exe failed (${rc}): not Warcraft II BNE 2.02?`);
     for (const [name, data] of opts.files) X.w2w_vfs_add(s.putStr(name), s.put(data), data.length);
-    const np = X.w2w_replay_open(s.put(opts.replay), opts.replay.length);
+    // live (a stream still growing): only the header goes in; step() then feeds each TURN chunk from opts.source()
+    // (the bytes so far) through a fixed buffer, and waits (status -2) at the end of what has arrived
+    s.live = opts.source || null;
+    const head = s.live ? opts.replay.subarray(0, w2rHeadLength(opts.replay)) : opts.replay;
+    const np = X.w2w_replay_open(s.put(head), head.length);
     if (!np) throw new Error('not a .w2r replay');
+    if (s.live) { s.feedCap = 1 << 16; s.feedP = X.w2w_malloc(s.feedCap); s.chunkAt = [head.length]; }
     s.pudName = s.cstr(np, 600);
     s.mtchRules = X.w2w_replay_rules();                       // plugin rule bits the .w2r says (W2_PATCH_PEON2K_*)
     if (opts.rules != null) X.w2w_replay_set_rules(opts.rules);
@@ -136,9 +187,18 @@ export class SimSession {
   misses() { const n = this.X.w2w_vfs_misses_len(); return n ? this.str(this.missPtr, n).split('\n').filter(Boolean) : []; }
 
   // Run one turn. Returns the w2w_replay_step status: 0 ok, 1 hash, 2 tick, 3 TX mismatch, 4 game over,
-  // 5 not ready, -1 end of file. The session is `ended` after 4/5/-1.
+  // 5 not ready, -1 end of file; live, -2: the next turn has not arrived (nothing ran). The session is `ended` after 4/5/-1.
   step() {
     if (this.ended) return this.lastStatus;
+    if (this.live) {
+      const c = this.nextChunk();
+      if (c === null) return -2;                 // not here yet
+      if (c) {
+        if (c.length > this.feedCap) throw new Error(`a turn of ${c.length} bytes`);
+        new Uint8Array(this.X.memory.buffer).set(c, this.feedP);
+        this.X.w2w_replay_feed(this.feedP, c.length);
+      } else this.X.w2w_replay_feed(this.feedP, 0);   // END: the replay is over
+    }
     const st = this.X.w2w_replay_step();
     this.lastStatus = st;
     if (st === -1 || st === 4 || st === 5) this.ended = true;
@@ -147,6 +207,28 @@ export class SimSession {
     return st;
   }
   get tick() { return this.X.w2w_tick_count(); }
+  // live: the TURN chunk of turn this.turn (with whatever non-TURN chunks precede it), false at END, null when it has
+  // not arrived. chunkAt[k] = where the chunks before turn k's TURN start (offsets in the growing stream).
+  nextChunk() {
+    const b = this.live(), at = this.chunkAt;
+    while (at.length <= this.turn + 1) {         // find the TURN chunk after at[last]
+      let o = at[at.length - 1];
+      const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+      for (;;) {
+        if (o + 8 > b.length) return null;
+        const len = dv.getUint32(o + 4, true), tag = String.fromCharCode(b[o], b[o + 1], b[o + 2], b[o + 3]);
+        if (o + 8 + len > b.length) return null;
+        if (tag === 'END ') return false;
+        o += 8 + len;
+        if (tag === 'TURN') { at.push(o); break; }
+      }
+    }
+    // only the TURN chunk itself (the others are CamRec data and such, the sim skips them anyway)
+    const end = at[this.turn + 1], dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    let o = at[this.turn];
+    while (o < end) { const len = dv.getUint32(o + 4, true); if (b[o] === 0x54 && b[o + 1] === 0x55 && b[o + 2] === 0x52 && b[o + 3] === 0x4e) return b.subarray(o, o + 8 + len); o += 8 + len; }
+    return false;
+  }
 
   // ---- state dumps (the viewer's seek cache). The whole state is the wasm memory (the module's only mutable global
   // is the stack pointer, back at its start between calls) plus the fields below. A dump keeps only the 64 KB pages

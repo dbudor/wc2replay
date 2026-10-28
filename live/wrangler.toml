@@ -1,0 +1,20 @@
+# w2live relay on Cloudflare (worker.js): npx wrangler deploy; npx wrangler secret put TOKEN
+name = "w2live"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+
+[[durable_objects.bindings]]
+name = "GAMES"
+class_name = "LiveGame"
+
+[[durable_objects.bindings]]
+name = "INDEX"
+class_name = "LiveIndex"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["LiveGame", "LiveIndex"]
+
+[vars]
+MIN_DELAY = "0"     # seconds every game is held back at least (the recorder's "delay" adds to it)
+KEEP_DAYS = "30"    # a game is deleted this long after it ended

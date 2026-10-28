@@ -479,10 +479,15 @@ export function outroStatsButton(art, O) {
 // hello: Ctrl-F1 abort, Alt-F2 drop, desync) was dropped. NET_TURNS.md §8.
 export class GameTracker {
   constructor(w2r) {
-    this.quitTurn = new Map(); this.localQuit = null;
+    this.quitTurn = new Map(); this.localQuit = null; this.scanned = 8;
+    this.scan(w2r);
+  }
+  // the chunks of w2r past what was scanned (a live stream grows: viewer.js calls it again); whole chunks only
+  scan(w2r) {
     const dv = new DataView(w2r.buffer, w2r.byteOffset, w2r.byteLength);
-    for (let o = 8; o + 8 <= w2r.length;) {
+    for (let o = this.scanned; o + 8 <= w2r.length; this.scanned = o) {
       const tag = dec.decode(w2r.subarray(o, o + 4)), len = dv.getUint32(o + 4, true), p = o + 8;
+      if (p + len > w2r.length) break;
       if (tag === 'TURN' && len >= 24) {
         const idx = dv.getUint32(p, true), nev = dv.getUint32(p + 20, true);
         for (let e = p + 24, i = 0; i < nev && e + 4 <= p + len; i++) {
