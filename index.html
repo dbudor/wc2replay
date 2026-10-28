@@ -90,6 +90,7 @@
       <div class="statsTabs" role="tablist">
         <button data-tab="units" role="tab" title="Units and buildings made so far, with how many are alive now (the top number) over how many were made (the bottom one; finished buildings, an upgraded hall counts again as its new type), the upgrades and spells researched, and the economy and army charts. Point at an icon to mark on the charts when those were made and lost">Units</button>
         <button data-tab="kills" role="tab" title="What was killed so far, a row per victims' player, friendly kills marked, with the cost of what was killed and of what was lost, and a chart of the value killed. Point at an icon to mark on the chart when those were killed">Kills</button>
+        <button data-tab="voice" role="tab" hidden title="Voice intensity (opt-in): how worked up each player sounds compared with their own normal in this game (pitch and loudness against their own average) and how much they talk, from their CamRec microphone. Not a stress or lie detector">Voice</button>
       </div>
       <span id="statsLegend" class="statsLegend"></span>
       <span id="statsTime" class="statsTime"></span>
@@ -99,8 +100,11 @@
     <div id="statsTip" class="statsTip" hidden></div>
   </div>
 
+  <div id="vuPanel" class="vuPanel glass" hidden></div>
+
   <div id="controls" class="controls glass" hidden>
     <div class="timeline">
+      <canvas id="voiceWave" class="voiceWave" hidden title="The watched player's voice: how loud (height) and how worked up compared with their own normal (colour: blue calmer, grey normal, orange to red worked up). A click goes there. The analysis can be switched off on the stats window's Voice tab (K)"></canvas>
       <input id="seek" type="range" min="0" max="1" value="0" step="1" aria-label="Seek">
       <output id="seekTip" class="seekTip" hidden></output>
     </div>
@@ -123,6 +127,8 @@
         <label class="chk" title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
         <label id="camBox" class="chk" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
         <label id="inputBox" class="chk" hidden title="Player view: the recorded mouse buttons, drag box and keys of that player (I): clicks, the box being dragged, the pressed command button, the keys pressed and actions per minute. Needs a recording by the current CamRec plugin."><input id="inputShow" type="checkbox" checked> Input</label>
+        <label id="waveBox" class="chk" hidden title="The watched player's voice above the timeline: loudness and how worked up they sounded"><input id="waveShow" type="checkbox" checked> Voice</label>
+        <label id="vuBox" class="chk" hidden title="Kmečometar: how worked up the watched player (or each team) sounds right now, from −2 R to +2 R (R: Rubelj; 0 = their own normal), the peak held 1.5 s"><input id="vuShow" type="checkbox"> Kmečometar</label>
       </span>
       <span id="pvSlot" class="pvSlot"></span>
       <span class="audio">

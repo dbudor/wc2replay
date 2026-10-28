@@ -72,8 +72,8 @@ function chunks(w2r) {
 export function camPacketsFromW2r(w2r) {
   const out = [];
   for (const c of chunks(w2r)) {
-    if (c.tag === 'CAMR') out.push(...camPacketsFromW2c(c.data));
-    else if (c.tag === 'CAMP') out.push(...camRecords(c.data));   // a live stream's pieces (livecap.js)
+    const got = c.tag === 'CAMR' ? camPacketsFromW2c(c.data) : c.tag === 'CAMP' ? camRecords(c.data) : null;   // CAMP: a live stream's pieces (livecap.js)
+    if (got) for (const p of got) out.push(p);   // (not push(...got): a long game has more packets than the stack takes)
   }
   return out;
 }
