@@ -77,9 +77,10 @@ import { MapRenderer, FogTracker } from './render.js';
 import { readUnits, readPlayers, tickMs, A } from './gamestate.js';
 import { GameAudio, ALT_SOUND, HK } from './audio.js';
 import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outroStatsButton, outcome, playerStats, GameTracker, OUTCOME_TEXT, Surface } from './screens.js';
-import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
+import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES, actionsUpTo } from './camrec.js';
 import { MicPlayer } from './micplay.js';
 import { pickUnit, unitRef, refAlive, unitInfo, typeName, UPGRADE_NAMES } from './unitinfo.js';
+import { kurcometar, kurcHtml } from './kurcometar.js';
 import { VoiceAnalysis, voiceSeries, voiceWave, intensityRgb, frameIntensity, lineChartSvg, WINDOW_S } from './voice.js';
 import { MatchStats, unitsHtml, killsHtml, stackChartSvg, smoothRate, minuteTotals, cost as unitCost, points as unitPoints, upgradeCost, isBuilding, fmtNum, UPGRADE_ICON } from './stats.js';
 import { Balloons, parseBalloons, balloonStub } from './balloons.js';
@@ -1621,7 +1622,7 @@ ui.score.addEventListener('click', e => {
 // / killed / researched.
 const mstats = new MatchStats();
 const sw = { el: $('statsWin'), body: $('statsBody'), tip: $('statsTip'), btn: $('statsBtn'), tab: 'units', last: 0, key: '', icons: new Map(), charts: null, hover: null };
-try { const t = localStorage.getItem('w2v.statsTab'); sw.tab = t === 'kills' || t === 'voice' ? t : 'units'; } catch { /* private window */ }
+try { const t = localStorage.getItem('w2v.statsTab'); sw.tab = ['kills', 'voice', 'kurc'].includes(t) ? t : 'units'; } catch { /* private window */ }
 const TEAM_RGB = [[106, 162, 255], [255, 107, 90]];   // teams: blue / red (players' own colours can be alike)
 const RES_RGB = [[232, 197, 71], [104, 170, 76], [140, 150, 170]], RES_NAME = ['gold', 'lumber', 'oil'], RES_W = [1, 3, 4], SCORE_RGB = [255, 255, 255];
 function setStats(on) {
@@ -1682,6 +1683,12 @@ function drawStats(force = false) {
     if (html !== sw.body._html) { sw.body.innerHTML = sw.body._html = html; if (sw.hover) statsHover(sw.hover); }
     const lg = $('statsLegend'), legend = voice.on ? groups.flatMap(g => g.members).filter(p => voiceTracks().has(p)).map(p => `<span class="key"><i style="background:rgb(${rgbOf(p)})"></i>${esc(st.pv.names[p] || `Player ${p + 1}`)}</span>`).join('') : '';
     if (lg._html !== legend) lg.innerHTML = lg._html = legend;
+    return;
+  }
+  if (sw.tab === 'kurc') {
+    html = kurcTab(m, tick, rgbOf, bw);
+    if (html !== sw.body._html) sw.body.innerHTML = sw.body._html = html;
+    const lg = $('statsLegend'); if (lg._html !== '') lg.innerHTML = lg._html = '';
     return;
   }
   if (sw.tab === 'units') {
@@ -1945,6 +1952,30 @@ function vuTick(now) {
     n.txt.textContent = `${+txt > 0 ? '+' : +txt < 0 ? '−' : ''}${Math.abs(+txt).toFixed(1)} R`;
   }
   vu.raf = requestAnimationFrame(vuTick);
+}
+// ---- Kurčometar (kurcometar.js): both teams always (it compares the whole lobby), "so far"
+function kurcTab(m, tick, rgbOf, bw) {
+  const ps = st.startPlayers || readPlayers(m), half = Math.ceil(ps.length / 2), teams = [ps.slice(0, half), ps.slice(half)].filter(t => t.length);
+  const minutes = tick * st.tickMs / 60000, tracks = voice.on ? voiceTracks() : new Map();
+  const sr = mstats.series(tick, mstats.read(m)), cost = t => unitCost(m, t);
+  const players = [];
+  for (const team of teams) for (const p of team) {
+    const mm = {}, ids = team.map(x => x.id);
+    if (minutes >= 1) {
+      if (tracks.has(p.id)) {
+        voiceEnsure();
+        const { t, v } = vuFrames(p.id); let n = 0, hot = 0;
+        for (let i = 0; i < t.length && t[i] <= tick; i++) { n++; if (v[i] > 1) hot++; }
+        mm.kmec = n * 0.04 / minutes * (1 + hot / Math.max(1, n));
+      }
+      const a = actionsUpTo(st.cam.tracks.get(p.id), tick, st.tickMs); if (a !== null) mm.apm = a / minutes;
+      const ap = sr.get([p.id], 'alivePoints'); if (ap.length) mm.army = ap.reduce((x, y) => x + y, 0) / ap.length;
+      mm.aggro = mstats.killedValue([tick], [p.id], ids, cost).reduce((x, k) => x + k[0], 0) / minutes;
+    }
+    players.push({ id: p.id, m: mm });
+  }
+  const res = kurcometar(players), nm = p => st.pv.names[p.id] || p.name || `Player ${p.id + 1}`;
+  return kurcHtml(teams.map((t, i) => ({ name: `Team ${i + 1}`, rgb: TEAM_RGB[i], players: t.map(p => ({ id: p.id, name: nm(p), rgb: rgbOf(p.id), m: null })) })), res, Math.min(bw, 760), minutes);
 }
 sw.body.addEventListener('click', e => {
   if (e.target.closest('.voiceOnBtn')) setVoice(true);

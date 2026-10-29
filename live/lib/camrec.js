@@ -336,3 +336,10 @@ export function micChunkPcm(chunk) {
   for (const b of chunk.blocks) { adpcmDecode(b, out, o); o += b.n; }
   return out;
 }
+// Actions (key and mouse presses, as APM counts them) up to game time t (fractional ticks); null without input.
+export function actionsUpTo(tr, t, tickMs) {
+  const I = tr && tr.input; if (!I) return null;
+  let lo = 0, hi = I.n;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (I.tick[mid] + Math.min(0.999, I.ms[mid] / tickMs) <= t) lo = mid + 1; else hi = mid; }
+  return I.acts[lo];
+}

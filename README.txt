@@ -214,6 +214,13 @@ loudness against their own average, and how many seconds a minute they talked. I
 sounds, not why: it is no stress or lie detector. These are real people's voices: look at this only with their
 agreement. The analysis runs in the browser only; switch it off on the Voice tab (remembered in this browser).
 
+Kurčometar (stats window)
+-------------------------
+A joke tab: how big each player acts, in centimetres, and each team's average. Each measure is compared with the
+other players in this game (the lobby average is 13.1 cm): how much and how worked up they talked (needs the
+voice analysis), their APM (needs a CamRec input recording), their combat army over the game, and the value they
+killed a minute. It measures ego, not anatomy.
+
 Live games
 ----------
 A game can be watched while it is played: one of the players' PCs runs the recorder in live/ (README.txt there)

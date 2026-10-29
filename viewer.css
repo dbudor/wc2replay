@@ -505,3 +505,26 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
 .vuLegend span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .vuLegend i { width: 8px; height: 8px; border-radius: 2px; }
 .vuLegend b { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; min-width: 34px; }
+
+/* ---- Kurčometar tab (kurcometar.js) */
+.kmWrap { display: grid; gap: 18px; max-width: 760px; }
+.kmHead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.kmHead b { font-size: 15px; }
+.kmCm { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.kmSub { color: var(--muted); font-size: 12px; }
+.kmRuler { display: block; }
+.kmRuler .kmWood { fill: #e8cf8f; stroke: #8a6a2a; }
+.kmRuler .kmTick { stroke: #4a3a18; stroke-width: 1; }
+.kmRuler .kmNum { font: 600 10px system-ui, sans-serif; fill: var(--muted); text-anchor: middle; }
+.kmRuler .kmBar { stroke: #1a1408; stroke-width: 1; }
+.kmRuler .kmAvg { stroke: #fff; stroke-width: 1.5; stroke-dasharray: 3 2; }
+.kmRows { display: grid; gap: 4px; margin-top: 6px; }
+.kmRow { display: grid; grid-template-columns: 10px minmax(90px, 160px) 64px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+.kmRow i { width: 10px; height: 10px; border-radius: 2px; }
+.kmRow b { font-variant-numeric: tabular-nums; text-align: right; }
+.kmName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kmChips { display: flex; flex-wrap: wrap; gap: 4px; }
+.kmChip { font-size: 11px; padding: 1px 6px; border-radius: 9px; background: rgba(255, 255, 255, .08); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kmChip.up { background: rgba(240, 150, 60, .22); color: #f3c27a; }
+.kmChip.down { background: rgba(90, 140, 230, .2); color: #9cbcf0; }
+.kmNote { color: var(--muted); font-size: 12px; line-height: 1.45; max-width: 760px; }
