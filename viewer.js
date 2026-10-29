@@ -77,7 +77,7 @@ import { MapRenderer, FogTracker } from './render.js';
 import { readUnits, readPlayers, tickMs, A } from './gamestate.js';
 import { GameAudio, ALT_SOUND, HK } from './audio.js';
 import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outroStatsButton, outcome, playerStats, GameTracker, OUTCOME_TEXT, Surface } from './screens.js';
-import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES, actionsUpTo } from './camrec.js';
+import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
 import { pickUnit, unitRef, refAlive, unitInfo, typeName, UPGRADE_NAMES } from './unitinfo.js';
 import { kurcometar, kurcHtml } from './kurcometar.js';
@@ -1968,7 +1968,7 @@ function kurcTab(m, tick, rgbOf, bw) {
         for (let i = 0; i < t.length && t[i] <= tick; i++) { n++; if (v[i] > 1) hot++; }
         mm.kmec = n * 0.04 / minutes * (1 + hot / Math.max(1, n));
       }
-      const a = actionsUpTo(st.cam.tracks.get(p.id), tick, st.tickMs); if (a !== null) mm.apm = a / minutes;
+      if (st.tracker && st.tracker.peerOf) mm.epm = st.tracker.commandsUpTo(st.tracker.peerOf[p.id], st.session.turn) / minutes;
       const ap = sr.get([p.id], 'alivePoints'); if (ap.length) mm.army = ap.reduce((x, y) => x + y, 0) / ap.length;
       mm.aggro = mstats.killedValue([tick], [p.id], ids, cost).reduce((x, k) => x + k[0], 0) / minutes;
     }
