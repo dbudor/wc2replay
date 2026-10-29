@@ -218,9 +218,11 @@ Kurčometar (stats window)
 -------------------------
 A joke tab: how big each player acts, in centimetres, and each team's average. Each measure is compared with the
 other players in this game (the lobby average is 13.1 cm): their EPM (game commands a minute, from the replay
-itself), the biggest combat army they had, and how much they fought away from home (value killed × 2 plus value
-lost a minute, lumber × 3 and oil × 4, each counting more the further it was from where they started); how worked up they talked (kmečanje, needs the voice analysis) counts against them, and calm talk counts
-for them, half as much. It measures ego, not anatomy.
+itself), the biggest combat army they had, and how much they fought away from home: the damage they did (× 2) and
+took, each hit as the unit's value (gold + lumber × 3 + oil × 4) × the hp lost / its max hp, divided by 5 − its
+distance from where they started (tiles, Manhattan) / 64, a minute (a polymorph and a sunk transport's cargo count
+all their hp). How worked up they talked (kmečanje, needs the voice analysis) counts against them, and calm talk
+counts for them, half as much. It measures ego, not anatomy.
 
 Live games
 ----------
