@@ -218,7 +218,9 @@ Damage (stats window)
 ---------------------
 The hp each player or team dealt to the other team so far, a line per unit type (its attack; a demolition squad's
 blast apart) and per spell (Blizzard, Death and Decay, Death Coil, Fireball, Flame Shield, Whirlwind, Exorcism,
-Runes, Polymorph: all the victim's hp, Unholy Armor: the hp it halves), the biggest first: the hp, its share, the
+Runes, Polymorph: all the victim's hp, Unholy Armor: the hp it halves), the biggest first: the hp, its share, a
+spell's commands (orders to cast it, one per order whatever the number of casters selected) and casts (mana
+spent: a blizzard ordered once is cast again and again, an order may come to nothing), the hits (each enemy unit hit, once per blow: a blizzard shard hitting three units is three), the
 kills (blows that took all a unit had, the units inside a sunk transport included) and, under "own", the hp and
 kills done to their own side. Below: their runes, how many were placed and how they ended: set off by an enemy,
 set off by their own or an ally, by a unit with unholy armour (no harm done), timed out, or still lying.
