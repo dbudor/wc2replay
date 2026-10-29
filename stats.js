@@ -17,6 +17,10 @@
 //   kills     killing blows of Unit_ApplyDamage (HK_KILL; Peon2k caster kills) and the kills the stats credit without
 //             a killer unit (HK_KILL_CREDIT: Peon2k's units inside a razed building / a sunk transport, rune kills),
 //             as the game's kills / razings stats, but own and allied victims included; neutral ones (critters) not.
+//   damage    hp lost (HK_DAMAGE): who dealt it (player, the attacker's unit type, HKD_* kind: its weapon or a spell...),
+//             to what, how much, whether the blow took all it had (a kill); a rune's player from its HK_RUNE
+//   runes     HK_RUNE: each rune placed (tick, slot, the caster's player, tile) and how it ended: a unit set it off
+//             (whose), one with unholy armour did, its time ran out
 //   samples   per player: gold / lumber / oil held, harvested (g_StatGoldMined, g_StatLumberHarvested,
 //             g_StatOilHarvested), score (g_StatScore), and the cost and points of the units alive. Got = what the player started with + harvested; spent = got - held.
 // Costs: g_UnitTypeGoldCost / LumberCost / OilCost (u8 x 10), g_UpgradeGoldCost / LumberCost / OilCost (u16), as the
@@ -27,6 +31,11 @@ import { HK } from './audio.js';
 export const SAMPLE_MS = 2000;
 const COST = [0x4ce8ec, 0x4cec3c, 0x4cedac], POINTS = 0x4cf190, UPG_COST = [0x4d0138, 0x4d0208, 0x4d01a0];
 export const UPGRADE_ICON = 0x4cff60;
+// HK_DAMAGE kinds (w2hooks.h HKD_*) and HK_RUNE ones (HKR_*); a kind's spell (UPGRADE_NAMES / its icon id), -1: a unit's
+export const HKD = { WEAPON: 0, FIREBALL: 1, FLAMESHIELD: 2, BLIZZARD: 3, DEATHDECAY: 4, WHIRLWIND: 5, DEATHCOIL: 6, EXORCISM: 7,
+  RUNES: 8, POLYMORPH: 9, DEMOLISH: 10, UNHOLY: 11 };
+export const HKD_SPELL = [-1, 38, 37, 42, 51, 47, 46, 36, 50, 41, -1, 49];
+export const HKR = { PLACED: 0, HIT: 1, UNHOLY: 2, EXPIRED: 3 };
 const SKIP = new Set([0x39, 0x5c, 0x5d, 0x5e, 0x5f, 0x64, 0x65, 0x66, 0x69, 0x6a, 0x6b, 0x6c, 0x6d]);
 const F = { gold: 0, lumber: 1, oil: 2, hg: 3, hl: 4, ho: 5, score: 6, aliveGold: 7, aliveLumber: 8, aliveOil: 9, alivePoints: 10,
   ncGold: 11, ncLumber: 12, ncOil: 13, ncPoints: 14 }, NF = 15;
@@ -47,7 +56,9 @@ export class MatchStats {
     this.made = new Map(); this.kills = new Map(); this.deaths = new Map(); this.research = new Map(); this.samples = [];
     this.unitType = new Map();                 // unit serial -> type first made as (conversions)
     this.killPos = new Map();                  // unit serial -> [x, y] (pixels) where it was killed
-    this.damage = new Map();                   // hp lost (HK_DAMAGE): key -> { tick, by, owner, type, hp, maxHp, pos }
+    this.damage = new Map();                   // hp lost (HK_DAMAGE): key -> { tick, by, atk, kind, owner, type, serial, hp, all, maxHp, pos }
+    this.runes = new Map();                    // `${tick}:${slot}` -> { tick, slot, owner, end, how, victim } (end, how: null while it lies)
+    this.runeSlot = new Map();                 // rune slot -> its runes by tick
     this.home = new Map(); this.homeTick = -1; // player -> [x, y]: the middle of what they had at the first tick seen
     this.lastTurn = -2; this.hiN = 0;
     this.clearSlots();
@@ -63,12 +74,16 @@ export class MatchStats {
   // After every turn: the turn just done, the tick reached and its hook events.
   turn(m, turn, tick, ev, tickMs) {
     const seen = new Map();   // a turn's identical hits stay apart (a turn run again after a seek gives the same keys)
+    let runeBy = 0xff;        // the player of the rune just set off (its HK_DAMAGE follows; the original keeps none)
     for (const e of ev) {
+      if (e.kind === HK.RUNE) { runeBy = this.rune(m, e); continue; }
       if (e.kind === HK.DAMAGE) {
         const owner = (e.d >> 8) & 0xff, type = e.d & 0xff; if (owner >= 8) continue;
-        const base = `${e.tick}:${m.r32(e.b + 0x14)}:${e.a}:${e.c}`, n = (seen.get(base) || 0) + 1; seen.set(base, n);
+        const kind = (e.a >>> 16) & 0xff, by = (e.a & 0xff) === 0xff && kind === HKD.RUNES ? runeBy : e.a & 0xff, serial = m.r32(e.b + 0x14);
+        const base = `${e.tick}:${serial}:${e.a}:${e.c}`, n = (seen.get(base) || 0) + 1; seen.set(base, n);
         const key = `${base}:${n}`;
-        if (!this.damage.has(key)) this.damage.set(key, { tick: e.tick, by: e.a, owner, type, hp: e.c, maxHp: m.r16(A.TypeMaxHp + 2 * type), pos: [m.s16(e.b), m.s16(e.b + 2)] });
+        if (!this.damage.has(key)) this.damage.set(key, { tick: e.tick, by, atk: (e.a >> 8) & 0xff, kind, owner, type, serial, hp: e.c,
+          all: !!(e.d & 0x10000), maxHp: m.r16(A.TypeMaxHp + 2 * type), pos: [m.s16(e.b), m.s16(e.b + 2)] });
         continue;
       }
       if (e.kind === HK.RESEARCH) {
@@ -86,6 +101,23 @@ export class MatchStats {
     this.scan(m, tick);
     const i = Math.floor(tick * tickMs / SAMPLE_MS);
     if (!this.samples[i]) this.samples[i] = { tick, v: this.read(m) };
+  }
+  // HK_RUNE: a rune placed is logged once; one set off or timed out ends the latest placed in its slot before (a turn run
+  // again finds it ended already). Gives the rune's player (0xff: unknown).
+  rune(m, e) {
+    if (e.a === HKR.PLACED) {
+      const key = `${e.tick}:${e.b}`;
+      if (!this.runes.has(key)) {
+        const r = { tick: e.tick, slot: e.b, owner: e.d, end: null, how: null, victim: -1 }, l = this.runeSlot.get(e.b) || [];
+        this.runes.set(key, r); l.push(r); l.sort((a, b) => a.tick - b.tick); this.runeSlot.set(e.b, l);
+      }
+      return e.d;
+    }
+    const l = this.runeSlot.get(e.b) || []; let r = null;
+    for (let i = l.length - 1; i >= 0; i--) if (l[i].tick < e.tick) { r = l[i]; break; }
+    if (!r) return 0xff;
+    if (r.end === null) { r.end = e.tick; r.how = e.a; r.victim = e.a === HKR.EXPIRED || !e.d ? -1 : m.r8(e.d + 0x2c); }
+    return r.owner;
   }
   // deaths: a counted unit or building whose slot is freed, marked dead, taken by another unit or turned into
   // something not counted (a corpse), by whatever means (killed, a demolition squad's blast, ...)
@@ -231,12 +263,42 @@ export class MatchStats {
     const w = pos => !h || !pos ? 1 / 5 : 1 / (5 - (Math.abs(pos[0] - h[0]) + Math.abs(pos[1] - h[1])) / 32 / 64);
     let v = 0;
     for (const e of this.damage.values()) {
-      if (e.tick > tick) continue;
+      if (e.tick > tick || e.kind === HKD.UNHOLY) continue;   // unholy armour's hp: a price paid, not a fight
       const part = value(e.type) * e.hp / Math.max(1, e.maxHp);
       if (e.by === p && !fr.has(e.owner)) v += 2 * part * w(e.pos);
       if (e.owner === p) v += part * w(e.pos);
     }
     return v;
+  }
+  // What the group's players dealt by `tick`, by source: a unit type's weapon (kind WEAPON, DEMOLISH: atk = the type) or
+  // a spell (atk -1): [{ kind, atk, hp, kills, ownHp, ownKills, by: Map player -> hp }], hp and kills to other players
+  // than `friends` (its team), own* to the team's own; a kill is a blow that took all a unit had.
+  damageBy(tick, members, friends = members) {
+    const inG = new Set(members), fr = new Set([...members, ...friends]), out = new Map(), dead = new Set();
+    for (const e of this.damage.values()) {
+      if (e.tick > tick || !inG.has(e.by)) continue;
+      const unit = e.kind === HKD.WEAPON || e.kind === HKD.DEMOLISH, key = unit ? `${e.kind}:${e.atk}` : `${e.kind}`;
+      const x = out.get(key) || { kind: e.kind, atk: unit ? e.atk : -1, hp: 0, kills: 0, ownHp: 0, ownKills: 0, by: new Map() };
+      const kill = e.all && !dead.has(e.serial), own = fr.has(e.owner);
+      if (kill) dead.add(e.serial);
+      if (own) { x.ownHp += e.hp; x.ownKills += kill; } else { x.hp += e.hp; x.kills += kill; x.by.set(e.by, (x.by.get(e.by) || 0) + e.hp); }
+      out.set(key, x);
+    }
+    return [...out.values()];
+  }
+  // The group's runes by `tick`: { placed, enemy, own (set off by a unit of another player than `friends` / of the
+  // team), unholy (by one with unholy armour), expired, lying (not yet ended) }
+  runesBy(tick, members, friends = members) {
+    const inG = new Set(members), fr = new Set([...members, ...friends]), r = { placed: 0, enemy: 0, own: 0, unholy: 0, expired: 0, lying: 0 };
+    for (const x of this.runes.values()) {
+      if (x.tick > tick || !inG.has(x.owner)) continue;
+      r.placed++;
+      if (x.end === null || x.end > tick) r.lying++;
+      else if (x.how === HKR.EXPIRED) r.expired++;
+      else if (x.how === HKR.UNHOLY) r.unholy++;
+      else if (fr.has(x.victim)) r.own++; else r.enemy++;
+    }
+    return r;
   }
   // series of sampled values up to `tick`, plus the live state `now` (read(m)) as its last point:
   //   { t: [ticks], get(members, field) -> [values summed over the group] }, fields as F plus gotGold / gotLumber / gotOil
@@ -357,6 +419,41 @@ export function killsHtml(o, groups, kills, lost) {
     const own = cnt(false, true) + cnt(true, true);
     return `<section class="stPlayer">${head(g, `<span class="stSum">${cnt(false, false)} kills · ${cnt(true, false)} razings${own ? ` · ${own} friendly` : ''} · value ${resSum(value(list.filter(k => !k.own)))} · lost ${resSum(lost[gi])}</span>`)}` +
       (body || '<div class="stNone">no kills yet</div>') + `</section>`;
+  }).join('');
+}
+
+// rows: per group damageBy(.., team); runes: per group runesBy(.., team). Per group what dealt the hp to other teams, a
+// line per unit type (its weapon; sappers' and dwarves' blasts apart) and per spell, the most first, with a bar against
+// the group's biggest, its share, the kills (blows that took all a unit had) and what hit the team's own; then how its
+// runes ended. o as above (upIcon / upName for the spells).
+const DM_RUNES = [['enemy', 'set off by an enemy'], ['own', 'set off by own or allied'], ['unholy', 'by unholy armour (no harm)'],
+  ['expired', 'timed out'], ['lying', 'still lying']];
+export function damageHtml(o, groups, rows, runes) {
+  const pct = (a, b) => b ? `${Math.round(100 * a / b)}%` : '';
+  return groups.map((g, gi) => {
+    const list = rows[gi].filter(x => x.hp || x.kills || x.ownHp || x.ownKills), many = g.members.length > 1;
+    const tot = list.reduce((a, x) => a + x.hp, 0), kills = list.reduce((a, x) => a + x.kills, 0);
+    const ownHp = list.reduce((a, x) => a + x.ownHp, 0), ownK = list.reduce((a, x) => a + x.ownKills, 0);
+    const top = Math.max(1, ...list.map(x => x.hp));
+    const line = x => {
+      const sp = HKD_SPELL[x.kind], who = x.by.size ? [...x.by].sort((a, b) => b[1] - a[1]) : [], owner = who.length ? who[0][0] : g.members[0];
+      const name = sp >= 0 ? o.upName(sp) : o.name(x.atk) + (x.kind === HKD.DEMOLISH ? ' (blast)' : '');
+      const src = sp >= 0 ? o.upIcon(sp, owner) : o.icon(x.atk, owner);
+      const tip = `${name}: ${x.hp} hp to enemies (${pct(x.hp, tot) || '0%'}), ${x.kills} kills` + (x.ownHp || x.ownKills ? `; own and allied: ${x.ownHp} hp, ${x.ownKills} kills` : '') +
+        (many && who.length > 1 ? `; ${who.map(([p, n]) => `${o.playerName(p)} ${n}`).join(', ')}` : '');
+      return `<div class="dmLine" title="${esc(tip)}"><span class="dmIcon">${src ? `<img src="${src}" alt="">` : ''}</span><span class="dmName">${esc(name)}</span>` +
+        `<span class="dmBar"><i style="width:${(100 * x.hp / top).toFixed(1)}%;background:rgb(${g.rgb})"></i></span><span class="dmHp">${fmtNum(x.hp)}</span>` +
+        `<span class="dmPct">${pct(x.hp, tot)}</span><span class="dmK">${x.kills || ''}</span><span class="dmOwn">${x.ownHp ? `${fmtNum(x.ownHp)}${x.ownKills ? ` · ${x.ownKills}` : ''}` : ''}</span></div>`;
+    };
+    const part = (label, l) => l.length ? `<div class="dmList"><div class="dmLine dmTop"><span class="dmIcon"></span><span class="dmName">${label}</span><span class="dmBar"></span><span class="dmHp">hp</span><span class="dmPct">share</span><span class="dmK">kills</span><span class="dmOwn">own</span></div>${l.sort((a, b) => b.hp - a.hp || b.kills - a.kills || b.ownHp - a.ownHp).map(line).join('')}</div>` : '';
+    const r = runes[gi], ended = r.placed - r.lying;
+    const rb = r.placed ? `<div class="dmRunes"><div class="dmRuneHead">Runes · ${r.placed} placed</div><div class="dmRuneBar">` +
+      DM_RUNES.filter(([k]) => r[k]).map(([k, t]) => `<i class="${k}" style="flex:${r[k]}" title="${r[k]} ${t} (${pct(r[k], r.placed)})"></i>`).join('') + `</div><div class="dmRuneKey">` +
+      DM_RUNES.filter(([k]) => r[k]).map(([k, t]) => `<span class="key"><i class="${k}"></i>${t} <b>${r[k]}</b> ${pct(r[k], r.placed)}</span>`).join('') +
+      (r.lying && ended ? `<span class="key">of those ended: ${DM_RUNES.slice(0, 4).filter(([k]) => r[k]).map(([k]) => `${k} ${pct(r[k], ended)}`).join(', ')}</span>` : '') + `</div></div>` : '';
+    const body = part('Units', list.filter(x => HKD_SPELL[x.kind] < 0)) + part('Spells', list.filter(x => HKD_SPELL[x.kind] >= 0)) + rb;
+    return `<section class="stPlayer">${head(g, `<span class="stSum">${fmtNum(tot)} hp dealt · ${kills} kills${ownHp || ownK ? ` · own and allied ${fmtNum(ownHp)} hp, ${ownK} kills` : ''}</span>`)}` +
+      (body ? `<div class="dmWrap">${body}</div>` : '<div class="stNone">no damage yet</div>') + `</section>`;
   }).join('');
 }
 

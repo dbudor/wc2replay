@@ -82,7 +82,7 @@ import { MicPlayer } from './micplay.js';
 import { pickUnit, unitRef, refAlive, unitInfo, typeName, UPGRADE_NAMES } from './unitinfo.js';
 import { kurcometar, kurcHtml } from './kurcometar.js';
 import { VoiceAnalysis, voiceSeries, voiceWave, intensityRgb, frameIntensity, lineChartSvg, WINDOW_S } from './voice.js';
-import { MatchStats, unitsHtml, killsHtml, stackChartSvg, smoothRate, minuteTotals, cost as unitCost, points as unitPoints, upgradeCost, isBuilding, fmtNum, UPGRADE_ICON } from './stats.js';
+import { MatchStats, unitsHtml, killsHtml, damageHtml, stackChartSvg, smoothRate, minuteTotals, cost as unitCost, points as unitPoints, upgradeCost, isBuilding, fmtNum, UPGRADE_ICON } from './stats.js';
 import { Balloons, parseBalloons, balloonStub } from './balloons.js';
 import { UiVoices, PlayerCamera, PlayerFrame, loadPlayerUiArt, selectionOf, visibleMessages, FRAME_W, FRAME_H, MAP_RECT, MINI_RECT } from './playerview.js';
 
@@ -1622,7 +1622,7 @@ ui.score.addEventListener('click', e => {
 // / killed / researched.
 const mstats = new MatchStats();
 const sw = { el: $('statsWin'), body: $('statsBody'), tip: $('statsTip'), btn: $('statsBtn'), tab: 'units', last: 0, key: '', icons: new Map(), charts: null, hover: null };
-try { const t = localStorage.getItem('w2v.statsTab'); sw.tab = ['kills', 'voice', 'kurc'].includes(t) ? t : 'units'; } catch { /* private window */ }
+try { const t = localStorage.getItem('w2v.statsTab'); sw.tab = ['kills', 'dmg', 'voice', 'kurc'].includes(t) ? t : 'units'; } catch { /* private window */ }
 const TEAM_RGB = [[106, 162, 255], [255, 107, 90]];   // teams: blue / red (players' own colours can be alike)
 const RES_RGB = [[232, 197, 71], [104, 170, 76], [140, 150, 170]], RES_NAME = ['gold', 'lumber', 'oil'], RES_W = [1, 3, 4], SCORE_RGB = [255, 255, 255];
 function setStats(on) {
@@ -1688,6 +1688,12 @@ function drawStats(force = false) {
   if (sw.tab === 'kurc') {
     html = kurcTab(m, tick, rgbOf, bw);
     if (html !== sw.body._html) sw.body.innerHTML = sw.body._html = html;
+    const lg = $('statsLegend'); if (lg._html !== '') lg.innerHTML = lg._html = '';
+    return;
+  }
+  if (sw.tab === 'dmg') {
+    html = damageHtml(o, groups, groups.map(g => mstats.damageBy(tick, g.members, g.team)), groups.map(g => mstats.runesBy(tick, g.members, g.team)));
+    if (html !== sw.body._html) { sw.body.innerHTML = sw.body._html = html; if (sw.hover) statsHover(sw.hover); }
     const lg = $('statsLegend'); if (lg._html !== '') lg.innerHTML = lg._html = '';
     return;
   }
