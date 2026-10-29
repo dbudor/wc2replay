@@ -1,25 +1,25 @@
 // Kurčometar (the stats window's tab, a joke the players asked for): how big each player acts, in centimetres, from
 // what the replay has: how much and how worked up they talked (voice.js), their game commands a minute (EPM),
 // their combat army over the game and the value they killed a minute. Each measure is compared with the other
-// players' in this game (z score, cut at ±2) and the player's length is 13.1 cm + 2.2 cm × the mean of their scores:
+// players' in this game (z score, cut at ±2; whining counts against: more of it is shorter) and the player's length is 13.1 cm + 2.2 cm × the mean of their scores:
 // the lobby average is 13.1 cm. A team's is its players' mean. It measures ego, not anatomy.
 export const KM_MEASURES = [
-  ['kmec', 'kmečanje', 'how much they talked (s / min), more when worked up (above +1 R)'],
+  ['kmec', 'kmečanje', 'how much they whined (s / min talking, more when worked up above +1 R): counts against', -1],
   ['epm', 'EPM', 'game commands per minute: orders, builds, training, selections... (from the replay, every player)'],
   ['army', 'vojska', 'combat army over the game (points)'],
   ['aggro', 'agresija', 'value killed per minute'],
 ];
 export const KM_AVG = 13.1, KM_CM = 2.2, KM_MIN = 5, KM_MAX = 25;
 // players: [{ id, m: { kmec?, epm?, army?, aggro? } }] (a measure left out: no data for that player)
-// -> Map id -> { cm, z: { measure: score } }
+// -> Map id -> { cm, z: { measure: score, signed as it counts } }
 export function kurcometar(players) {
   const z = new Map(players.map(p => [p.id, {}]));
-  for (const [k] of KM_MEASURES) {
+  for (const [k, , , sign = 1] of KM_MEASURES) {
     const has = players.filter(p => Number.isFinite(p.m[k]));
     if (has.length < 2) continue;
     const mean = has.reduce((a, p) => a + p.m[k], 0) / has.length;
     const sd = Math.sqrt(has.reduce((a, p) => a + (p.m[k] - mean) ** 2, 0) / has.length);
-    for (const p of has) z.get(p.id)[k] = sd > 1e-9 ? Math.max(-2, Math.min(2, (p.m[k] - mean) / sd)) : 0;
+    for (const p of has) z.get(p.id)[k] = sd > 1e-9 ? sign * Math.max(-2, Math.min(2, (p.m[k] - mean) / sd)) : 0;
   }
   const out = new Map();
   for (const p of players) {
