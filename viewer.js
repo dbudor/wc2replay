@@ -1964,9 +1964,10 @@ function kurcTab(m, tick, rgbOf, bw) {
     if (minutes >= 1) {
       if (tracks.has(p.id)) {
         voiceEnsure();
-        const { t, v } = vuFrames(p.id); let n = 0, hot = 0;
-        for (let i = 0; i < t.length && t[i] <= tick; i++) { n++; if (v[i] > 1) hot++; }
-        mm.kmec = n * 0.04 / minutes * (1 + hot / Math.max(1, n));
+        // R·seconds a minute of speech (R cut at ±2): worked up (above 0) counts fully, calm (below 0) half
+        const { t, v } = vuFrames(p.id); let w = 0;
+        for (let i = 0; i < t.length && t[i] <= tick; i++) if (Number.isFinite(v[i])) { const r = Math.max(-2, Math.min(2, v[i])); w += r > 0 ? r : r / 2; }
+        mm.kmec = w * 0.04 / minutes;
       }
       if (st.tracker && st.tracker.peerOf) mm.epm = st.tracker.commandsUpTo(st.tracker.peerOf[p.id], st.session.turn) / minutes;
       const ap = sr.get([p.id], 'alivePoints'); if (ap.length) mm.army = ap.reduce((x, y) => x + y, 0) / ap.length;
