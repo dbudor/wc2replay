@@ -1,16 +1,16 @@
 // Kurčometar (the stats window's tab, a joke the players asked for): how big each player acts, in centimetres, from
-// what the replay has: how much and how worked up they talked (voice.js), their actions per minute (CamRec input),
+// what the replay has: how much and how worked up they talked (voice.js), their game commands a minute (EPM),
 // their combat army over the game and the value they killed a minute. Each measure is compared with the other
 // players' in this game (z score, cut at ±2) and the player's length is 13.1 cm + 2.2 cm × the mean of their scores:
 // the lobby average is 13.1 cm. A team's is its players' mean. It measures ego, not anatomy.
 export const KM_MEASURES = [
   ['kmec', 'kmečanje', 'how much they talked (s / min), more when worked up (above +1 R)'],
-  ['apm', 'APM', 'actions per minute (CamRec input)'],
+  ['epm', 'EPM', 'game commands per minute: orders, builds, training, selections... (from the replay, every player)'],
   ['army', 'vojska', 'combat army over the game (points)'],
   ['aggro', 'agresija', 'value killed per minute'],
 ];
 export const KM_AVG = 13.1, KM_CM = 2.2, KM_MIN = 5, KM_MAX = 25;
-// players: [{ id, m: { kmec?, apm?, army?, aggro? } }] (a measure left out: no data for that player)
+// players: [{ id, m: { kmec?, epm?, army?, aggro? } }] (a measure left out: no data for that player)
 // -> Map id -> { cm, z: { measure: score } }
 export function kurcometar(players) {
   const z = new Map(players.map(p => [p.id, {}]));
@@ -59,5 +59,5 @@ export function kurcHtml(teams, res, w, minutes) {
     }
     html += '</div></div>';
   }
-  return html + `</div><p class="kmNote">Measures ego, not anatomy: each player against the others in this game (the lobby average is ${KM_AVG} cm), from what they did so far: ${KM_MEASURES.map(([, l, t]) => `<b>${esc(l)}</b> ${esc(t)}`).join('; ')}. A measure without data (no microphone, no input recording) is left out.</p>`;
+  return html + `</div><p class="kmNote">Measures ego, not anatomy: each player against the others in this game (the lobby average is ${KM_AVG} cm), from what they did so far: ${KM_MEASURES.map(([, l, t]) => `<b>${esc(l)}</b> ${esc(t)}`).join('; ')}. A measure without data (no microphone) is left out.</p>`;
 }

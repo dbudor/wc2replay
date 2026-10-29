@@ -477,9 +477,15 @@ export function outroStatsButton(art, O) {
 // ---------------------------------------------------------------- who left / was eliminated, while stepping
 // Turn packets of type 0x10 (quit) in the .w2r, by sending peer; a player that leaves without one (type 4
 // hello: Ctrl-F1 abort, Alt-F2 drop, desync) was dropped. NET_TURNS.md §8.
+// Turn packet types that are a player's game commands, for EPM (sim/NET_TURNS.md §3): not the transport's pads,
+// resend requests, NAKs and hellos (1-4), player left (0x10), chat (0x23), cheats (0x24), diplomacy (0x26), speed
+// (0x27), pause / unpause (0x29 / 0x2a). Every peer sends a packet a turn; only these are the player doing something.
+const NOT_CMD = new Set([1, 2, 3, 4, 0x10, 0x23, 0x24, 0x26, 0x27, 0x29, 0x2a]);
+const GAME_CMD = t => !NOT_CMD.has(t);
+
 export class GameTracker {
   constructor(w2r) {
-    this.quitTurn = new Map(); this.localQuit = null; this.scanned = 8;
+    this.quitTurn = new Map(); this.localQuit = null; this.scanned = 8; this.cmds = new Map();
     this.scan(w2r);
   }
   // the chunks of w2r past what was scanned (a live stream grows: viewer.js calls it again); whole chunks only
@@ -493,12 +499,19 @@ export class GameTracker {
         for (let e = p + 24, i = 0; i < nev && e + 4 <= p + len; i++) {
           const kind = w2r[e], n = dv.getUint16(e + 2, true), d = e + 4;
           if (kind === 1 && n > 7 && w2r[d + 6] === 0x10 && !this.quitTurn.has(w2r[d + 1])) this.quitTurn.set(w2r[d + 1], idx);
+          if (kind >= 1 && kind <= 3 && n > 7 && GAME_CMD(w2r[d + 6])) { let c = this.cmds.get(w2r[d + 1]); if (!c) this.cmds.set(w2r[d + 1], c = []); c.push(idx); }
           e = d + n;
         }
       }
       if (tag === 'QUIT' && len >= 8) this.localQuit = { peer: w2r[p], turn: dv.getUint32(p + 4, true) };   // pcap.js withLocalQuit
       o = p + len;
     }
+  }
+  // the commands (EPM) peer `peer` had sent by turn `turn`
+  commandsUpTo(peer, turn) {
+    const c = this.cmds.get(peer); if (!c) return 0;
+    let lo = 0, hi = c.length; while (lo < hi) { const m = (lo + hi) >> 1; if (c[m] <= turn) lo = m + 1; else hi = m; }
+    return lo;
   }
   // m = arena right after the boot
   reset(m) {
