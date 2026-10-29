@@ -47,6 +47,7 @@ export class MatchStats {
     this.made = new Map(); this.kills = new Map(); this.deaths = new Map(); this.research = new Map(); this.samples = [];
     this.unitType = new Map();                 // unit serial -> type first made as (conversions)
     this.killPos = new Map();                  // unit serial -> [x, y] (pixels) where it was killed
+    this.damage = new Map();                   // hp lost (HK_DAMAGE): key -> { tick, by, owner, type, hp, maxHp, pos }
     this.home = new Map(); this.homeTick = -1; // player -> [x, y]: the middle of what they had at the first tick seen
     this.lastTurn = -2; this.hiN = 0;
     this.clearSlots();
@@ -61,7 +62,15 @@ export class MatchStats {
 
   // After every turn: the turn just done, the tick reached and its hook events.
   turn(m, turn, tick, ev, tickMs) {
+    const seen = new Map();   // a turn's identical hits stay apart (a turn run again after a seek gives the same keys)
     for (const e of ev) {
+      if (e.kind === HK.DAMAGE) {
+        const owner = (e.d >> 8) & 0xff, type = e.d & 0xff; if (owner >= 8) continue;
+        const base = `${e.tick}:${m.r32(e.b + 0x14)}:${e.a}:${e.c}`, n = (seen.get(base) || 0) + 1; seen.set(base, n);
+        const key = `${base}:${n}`;
+        if (!this.damage.has(key)) this.damage.set(key, { tick: e.tick, by: e.a, owner, type, hp: e.c, maxHp: m.r16(A.TypeMaxHp + 2 * type), pos: [m.s16(e.b), m.s16(e.b + 2)] });
+        continue;
+      }
       if (e.kind === HK.RESEARCH) {
         const key = `${e.tick}:${e.a}:${e.b}`;
         if (e.a < 8 && !this.research.has(key)) this.research.set(key, { tick: e.tick, owner: e.a, id: e.b });
@@ -212,15 +221,21 @@ export class MatchStats {
     for (const e of this.kills.values()) if (e.tick <= tick && e.type === type && e.owner === owner && inG.has(e.by)) out.push(e.tick);
     return out;
   }
-  // Kurčometar's aggression of one player by `tick`: (value killed of other players than `friends` × 2 + value lost)
-  // with each kill / death divided by 5 − its Manhattan distance from the player's home in tiles / 64: at home a fifth,
-  // 128 tiles away a third, a 128-tile map's far corner (254 tiles) about 1. value(type) -> a number (cost weighed as the charts do)
+  // Kurčometar's aggression of one player by `tick`, from the hp lost (HK_DAMAGE; polymorph and a sunk transport's
+  // cargo: all their hp): what they did to other players than `friends` (value × hp / max hp, × 2) and what they took
+  // (the same of their own units), each divided by 5 − its Manhattan distance from the player's home in tiles / 64: at
+  // home a fifth, 128 tiles away a third, a 128-tile map's far corner (254 tiles) about 1. value(type) -> a number
+  // (cost weighed as the charts do)
   aggression(tick, p, friends, value) {
     const fr = new Set([p, ...friends]), h = this.home.get(p);
     const w = pos => !h || !pos ? 1 / 5 : 1 / (5 - (Math.abs(pos[0] - h[0]) + Math.abs(pos[1] - h[1])) / 32 / 64);
     let v = 0;
-    for (const e of this.kills.values()) if (e.tick <= tick && e.by === p && !fr.has(e.owner)) v += 2 * value(e.type) * w(e.pos);
-    for (const e of this.deaths.values()) if (e.tick <= tick && e.owner === p) v += value(e.type) * w(e.pos);
+    for (const e of this.damage.values()) {
+      if (e.tick > tick) continue;
+      const part = value(e.type) * e.hp / Math.max(1, e.maxHp);
+      if (e.by === p && !fr.has(e.owner)) v += 2 * part * w(e.pos);
+      if (e.owner === p) v += part * w(e.pos);
+    }
     return v;
   }
   // series of sampled values up to `tick`, plus the live state `now` (read(m)) as its last point:
