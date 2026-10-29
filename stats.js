@@ -46,6 +46,8 @@ export class MatchStats {
   reset() {
     this.made = new Map(); this.kills = new Map(); this.deaths = new Map(); this.research = new Map(); this.samples = [];
     this.unitType = new Map();                 // unit serial -> type first made as (conversions)
+    this.killPos = new Map();                  // unit serial -> [x, y] (pixels) where it was killed
+    this.home = new Map(); this.homeTick = -1; // player -> [x, y]: the middle of what they had at the first tick seen
     this.lastTurn = -2; this.hiN = 0;
     this.clearSlots();
   }
@@ -67,8 +69,8 @@ export class MatchStats {
       }
       if (e.kind !== HK.KILL && e.kind !== HK.KILL_CREDIT || e.d >= 8) continue;
       const by = e.kind === HK.KILL ? m.r8(e.a + 0x2c) : e.a; if (by >= 8) continue;
-      const key = `${e.tick}:${m.r32(e.b + 0x14)}`;
-      if (!this.kills.has(key)) this.kills.set(key, { tick: e.tick, by, type: e.c, owner: e.d });
+      const serial = m.r32(e.b + 0x14), key = `${e.tick}:${serial}`, pos = [m.s16(e.b), m.s16(e.b + 2)];
+      if (!this.kills.has(key)) { this.kills.set(key, { tick: e.tick, by, type: e.c, owner: e.d, pos }); this.killPos.set(serial, pos); }
     }
     if (turn !== this.lastTurn + 1) this.clearSlots();
     this.lastTurn = turn;
@@ -80,10 +82,14 @@ export class MatchStats {
   // something not counted (a corpse), by whatever means (killed, a demolition squad's blast, ...)
   scan(m, tick) {
     const u8 = m.u8, dv = m.dv, b = m.base, n = m.r32(A.UnitCount), seen = this.seen, live = this.live;
-    const die = i => {
-      if (!this.deaths.has(live[i])) this.deaths.set(live[i], { tick, owner: this.liveO[i], type: this.liveT[i] });
+    const die = i => {   // where: where it was killed, else its slot's position while the slot still holds it
+      const u = b + m.r32(A.Units) + 0x98 * i, same = dv.getUint32(u + 0x14, true) === live[i];
+      if (!this.deaths.has(live[i])) this.deaths.set(live[i], { tick, owner: this.liveO[i], type: this.liveT[i],
+        pos: this.killPos.get(live[i]) || (same ? [dv.getInt16(u, true), dv.getInt16(u + 2, true)] : null) });
       live[i] = 0;
     };
+    const first = this.homeTick < 0 || this.homeTick === tick, acc = first ? new Map() : null;
+    if (first) this.homeTick = tick;
     for (let i = n; i < this.hiN; i++) { if (live[i]) die(i); seen[2 * i] = 0; }
     this.hiN = n;
     for (let i = 0, u = b + m.r32(A.Units); i < n; i++, u += 0x98) {
@@ -97,12 +103,14 @@ export class MatchStats {
       if (live[i] && (live[i] !== serial || !counted)) die(i);
       if (!counted) continue;
       live[i] = serial; this.liveT[i] = t; this.liveO[i] = p;
+      if (acc) { const a = acc.get(p) || [0, 0, 0]; a[0] += dv.getInt16(u, true); a[1] += dv.getInt16(u + 2, true); a[2]++; acc.set(p, a); }
       const key = serial * 128 + t;
       if (this.made.has(key)) continue;
       let conv = false;
       if (!bl) { const was = this.unitType.get(serial); if (was === undefined) this.unitType.set(serial, t); else conv = was !== t; }
       this.made.set(key, { tick, owner: p, type: t, conv });
     }
+    if (acc) for (const [p, a] of acc) this.home.set(p, [a[0] / a[2], a[1] / a[2]]);
   }
   // the sampled values of all 8 players now
   read(m) {
@@ -203,6 +211,17 @@ export class MatchStats {
     const inG = new Set(members), out = [];
     for (const e of this.kills.values()) if (e.tick <= tick && e.type === type && e.owner === owner && inG.has(e.by)) out.push(e.tick);
     return out;
+  }
+  // Kurčometar's aggression of one player by `tick`: (value killed of other players than `friends` × 2 + value lost)
+  // with each kill / death divided by 5 − its Manhattan distance from the player's home in tiles / 64: at home a fifth,
+  // 128 tiles away a third, a 128-tile map's far corner (254 tiles) about 1. value(type) -> a number (cost weighed as the charts do)
+  aggression(tick, p, friends, value) {
+    const fr = new Set([p, ...friends]), h = this.home.get(p);
+    const w = pos => !h || !pos ? 1 / 5 : 1 / (5 - (Math.abs(pos[0] - h[0]) + Math.abs(pos[1] - h[1])) / 32 / 64);
+    let v = 0;
+    for (const e of this.kills.values()) if (e.tick <= tick && e.by === p && !fr.has(e.owner)) v += 2 * value(e.type) * w(e.pos);
+    for (const e of this.deaths.values()) if (e.tick <= tick && e.owner === p) v += value(e.type) * w(e.pos);
+    return v;
   }
   // series of sampled values up to `tick`, plus the live state `now` (read(m)) as its last point:
   //   { t: [ticks], get(members, field) -> [values summed over the group] }, fields as F plus gotGold / gotLumber / gotOil
