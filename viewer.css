@@ -528,3 +528,30 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
 .kmChip.up { background: rgba(240, 150, 60, .22); color: #f3c27a; }
 .kmChip.down { background: rgba(90, 140, 230, .2); color: #9cbcf0; }
 .kmNote { color: var(--muted); font-size: 12px; line-height: 1.45; max-width: 760px; }
+/* Damage tab: what dealt the hp (units, spells) and how the runes ended */
+.dmWrap { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 560px)); gap: 8px 22px; align-items: start; }
+.dmList { display: grid; gap: 3px; font-size: 12px; font-variant-numeric: tabular-nums; min-width: 0; }
+.dmLine { display: grid; grid-template-columns: 34px minmax(70px, 170px) minmax(40px, 1fr) 44px 34px 30px 58px; align-items: center; gap: 6px; }
+.dmTop { color: var(--muted); font-size: 11px; }
+.dmTop .dmName { font-weight: 700; color: var(--text); font-size: 12px; }
+.dmIcon { width: 34px; height: 28px; border-radius: 3px; overflow: hidden; background: #000; }
+.dmTop .dmIcon { background: none; height: 0; }
+.dmIcon img { display: block; width: 34px; height: 28px; image-rendering: pixelated; }
+.dmName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dmBar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.dmTop .dmBar { background: none; }
+.dmBar i { display: block; height: 100%; border-radius: 4px; }
+.dmHp, .dmPct, .dmK, .dmOwn { text-align: right; white-space: nowrap; }
+.dmPct, .dmOwn { color: var(--muted); }
+.dmRunes { grid-column: 1 / -1; max-width: 1142px; font-size: 12px; }
+.dmRuneHead { font-weight: 700; margin: 4px 0; }
+.dmRuneBar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: rgba(255, 255, 255, .06); }
+.dmRuneKey { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 5px; color: var(--muted); }
+.dmRuneKey b { color: var(--text); font-weight: 600; }
+.dmRuneKey i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.dmRuneBar .enemy, .dmRuneKey .enemy { background: #e0503c; }
+.dmRuneBar .own, .dmRuneKey .own { background: #e0a03c; }
+.dmRuneBar .unholy, .dmRuneKey .unholy { background: #8a5ad0; }
+.dmRuneBar .expired, .dmRuneKey .expired { background: #6f7480; }
+.dmRuneBar .lying, .dmRuneKey .lying { background: #3a8fd0; }
+@media (max-width: 520px) { .dmLine { grid-template-columns: 28px minmax(60px, 1fr) minmax(30px, .8fr) 40px 32px 28px 50px; gap: 4px; } .dmIcon, .dmIcon img { width: 28px; height: 23px; } }

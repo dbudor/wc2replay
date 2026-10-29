@@ -214,6 +214,15 @@ loudness against their own average, and how many seconds a minute they talked. I
 sounds, not why: it is no stress or lie detector. These are real people's voices: look at this only with their
 agreement. The analysis runs in the browser only; switch it off on the Voice tab (remembered in this browser).
 
+Damage (stats window)
+---------------------
+The hp each player or team dealt to the other team so far, a line per unit type (its attack; a demolition squad's
+blast apart) and per spell (Blizzard, Death and Decay, Death Coil, Fireball, Flame Shield, Whirlwind, Exorcism,
+Runes, Polymorph: all the victim's hp, Unholy Armor: the hp it halves), the biggest first: the hp, its share, the
+kills (blows that took all a unit had, the units inside a sunk transport included) and, under "own", the hp and
+kills done to their own side. Below: their runes, how many were placed and how they ended: set off by an enemy,
+set off by their own or an ally, by a unit with unholy armour (no harm done), timed out, or still lying.
+
 Kurčometar (stats window)
 -------------------------
 A joke tab: how big each player acts, in centimetres, and each team's average. Each measure is compared with the
