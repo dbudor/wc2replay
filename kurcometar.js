@@ -1,13 +1,14 @@
 // Kurčometar (the stats window's tab, a joke the players asked for): how big each player acts, in centimetres, from
-// what the replay has: how much and how worked up they talked (voice.js), their game commands a minute (EPM),
-// their combat army over the game and the value they killed a minute. Each measure is compared with the other
-// players' in this game (z score, cut at ±2; whining counts against: more of it is shorter) and the player's length is 13.1 cm + 2.2 cm × the mean of their scores:
-// the lobby average is 13.1 cm. A team's is its players' mean. It measures ego, not anatomy.
+// what the replay has: their game commands a minute (EPM), the biggest combat army they had, how much they fought
+// away from home (value killed × 2 + lost a minute, more the further from their start) and how worked up they
+// talked (voice.js; against them, calm talk for them at half). Each measure is compared with the other players' in
+// this game (z score, cut at ±2) and the player's length is 13.1 cm + 2.2 cm × the mean of their scores: the lobby
+// average is 13.1 cm. A team's is its players' mean. It measures ego, not anatomy.
 export const KM_MEASURES = [
   ['kmec', 'kmečanje', 'how worked up they talked: R × seconds a minute of speech; above 0 R counts against, calm (below 0 R) counts for, half as much', -1],
   ['epm', 'EPM', 'game commands per minute: orders, builds, training, selections... (from the replay, every player)'],
-  ['army', 'vojska', 'combat army over the game (points)'],
-  ['aggro', 'agresija', 'value killed per minute'],
+  ['army', 'vojska', 'the biggest combat army they ever had (points)'],
+  ['aggro', 'agresija', 'fighting away from home: value killed × 2 + value lost (lumber × 3, oil × 4) a minute, each divided by 5 − tiles from their start (Manhattan) / 64'],
 ];
 export const KM_AVG = 13.1, KM_CM = 2.2, KM_MIN = 5, KM_MAX = 25;
 // players: [{ id, m: { kmec?, epm?, army?, aggro? } }] (a measure left out: no data for that player)

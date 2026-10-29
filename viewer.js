@@ -1970,8 +1970,10 @@ function kurcTab(m, tick, rgbOf, bw) {
         mm.kmec = w * 0.04 / minutes;
       }
       if (st.tracker && st.tracker.peerOf) mm.epm = st.tracker.commandsUpTo(st.tracker.peerOf[p.id], st.session.turn) / minutes;
-      const ap = sr.get([p.id], 'alivePoints'); if (ap.length) mm.army = ap.reduce((x, y) => x + y, 0) / ap.length;
-      mm.aggro = mstats.killedValue([tick], [p.id], ids, cost).reduce((x, k) => x + k[0], 0) / minutes;
+      const ap = sr.get([p.id], 'alivePoints'); if (ap.length) mm.army = Math.max(...ap);   // the biggest combat army they ever had
+      // fighting away from home: value killed × 2 + value lost (lumber × 3, oil × 4), more the further from where
+      // they started (MatchStats.aggression), a minute
+      mm.aggro = mstats.aggression(tick, p.id, ids, t => cost(t).reduce((x, c, k) => x + c * RES_W[k], 0)) / minutes;
     }
     players.push({ id: p.id, m: mm });
   }
