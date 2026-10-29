@@ -4,7 +4,7 @@
 // players' in this game (z score, cut at ±2; whining counts against: more of it is shorter) and the player's length is 13.1 cm + 2.2 cm × the mean of their scores:
 // the lobby average is 13.1 cm. A team's is its players' mean. It measures ego, not anatomy.
 export const KM_MEASURES = [
-  ['kmec', 'kmečanje', 'how much they whined (s / min talking, more when worked up above +1 R): counts against', -1],
+  ['kmec', 'kmečanje', 'how worked up they talked: R × seconds a minute of speech; above 0 R counts against, calm (below 0 R) counts for, half as much', -1],
   ['epm', 'EPM', 'game commands per minute: orders, builds, training, selections... (from the replay, every player)'],
   ['army', 'vojska', 'combat army over the game (points)'],
   ['aggro', 'agresija', 'value killed per minute'],

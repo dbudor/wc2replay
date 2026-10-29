@@ -218,8 +218,8 @@ Kurčometar (stats window)
 -------------------------
 A joke tab: how big each player acts, in centimetres, and each team's average. Each measure is compared with the
 other players in this game (the lobby average is 13.1 cm): their EPM (game commands a minute, from the replay
-itself), their combat army over the game and the value they killed a minute; how much and how worked up they
-whined (kmečanje, needs the voice analysis) counts against. It measures ego, not anatomy.
+itself), their combat army over the game and the value they killed a minute; how worked up they talked
+(kmečanje, needs the voice analysis) counts against, and calm talk counts for them, half as much. It measures ego, not anatomy.
 
 Live games
 ----------
