@@ -132,7 +132,8 @@ restarting the other. If anything misbehaves, put the original back.
 
 Recording the players' cameras and voices: CamRec plugin
 --------------------------------------------------------
-plugin/camrec.w2p is a War2Combat plugin. Copy it into the plugin\ folder of every player's War2Combat install.
+plugin/camrec.w2p is a War2Combat plugin. Copy it, with plugin/camrec-opus.exe (its voice encoder), into the plugin\
+folder of every player's War2Combat install. Without camrec-opus.exe it still records, with voices 2.6 times bigger.
 
 During a game it records that player's viewport, mouse and, in multiplayer games, microphone (only while someone
 talks). It broadcasts them on the network (UDP port 34755), so your capture holds every player who ran it. It also
@@ -142,7 +143,8 @@ the plugin can join as usual.
 Microphone: everyone in the game should know they are recorded; the plugin says so with a game message
 ("CamRec: recording microphone (...)") a moment after the game starts. camrec.ini next to the game's exe (made on
 the first game) has the settings: mic=0 turns recording off, mic_device=part-of-a-name picks the microphone
-(camrec\mic-devices.txt lists them), mic_broadcast=0 keeps your voice off the network (file only). If the message
+(camrec\mic-devices.txt lists them), mic_broadcast=0 keeps your voice off the network (file only), mic_codec=adpcm
+records the voice without camrec-opus.exe (the Opus encoder runs as its own small process, never inside the game). If the message
 says the microphone is silent, check it is not muted and that Windows allows desktop apps to use the microphone.
 
 In the viewer:

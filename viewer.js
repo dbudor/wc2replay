@@ -79,6 +79,8 @@ import { GameAudio, ALT_SOUND, HK } from './audio.js';
 import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outroStatsButton, outcome, playerStats, GameTracker, OUTCOME_TEXT, Surface } from './screens.js';
 import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
+import { opusInit, opusReady } from './opus.js';
+opusInit();   // CamRec's Opus audio decoder (opus.wasm), ready long before a replay is picked
 import { pickUnit, unitRef, refAlive, unitInfo, typeName, UPGRADE_NAMES } from './unitinfo.js';
 import { kurcometar, kurcHtml } from './kurcometar.js';
 import { VoiceAnalysis, voiceSeries, voiceWave, intensityRgb, frameIntensity, lineChartSvg, WINDOW_S } from './voice.js';
@@ -164,6 +166,7 @@ function refreshCams() {
   ui.camBox.hidden = !st.cam.tracks.size;
   ui.inputBox.hidden = ![...st.cam.tracks.values()].some(t => t.input);
   st.mic = buildMicTracks(pk, st.cam.tracks);
+  if (!opusReady() && [...st.mic.values()].some(t => t.blocks.some(b => b.opus))) opusInit().then(ok => ok && refreshCams());   // decoder still loading: again when it is in
   mic.setTracks(st.mic, st.tickMs || 1000 / 30);
   ui.micsBox.hidden = !mic.players.length;
   $('waveBox').hidden = $('vuBox').hidden = ![...st.mic.values()].some(t => t.blocks && t.blocks.length);

@@ -5,7 +5,7 @@
 // from the game (the replay stalled, or the tab slept). Only at 1x: other speeds stop the voices.
 // Which players are heard: the one the view is linked to (focus, set by the viewer every frame), else the ones
 // picked by hand (picked; none at first).
-import { micChunks, micChunkPcm, adpcmDecode, MIC_RATE } from './camrec.js';
+import { micChunks, micChunkPcm, MIC_RATE } from './camrec.js';
 
 const LOOKAHEAD = 0.4;        // s
 const DRIFT = 0.3;            // s: a playing chunk further than this from the game is restarted
@@ -17,11 +17,10 @@ const FRAME = 320;            // 20 ms
 // A track's speech level: the 90th percentile of its 20 ms frames' mean |sample| (the plugin stores only speech,
 // so this is a loud word, not one click). 0 when it holds no audio.
 export function speechLevel(track) {
-  const lv = [], buf = new Float32Array(4096);
-  for (const b of track.blocks) {
-    if (!b.n || b.n > buf.length) continue;
-    adpcmDecode(b, buf, 0);
-    for (let o = 0; o + FRAME <= b.n; o += FRAME) { let s = 0; for (let i = o; i < o + FRAME; i++) s += Math.abs(buf[i]); lv.push(s / FRAME); }
+  const lv = [];
+  for (const c of micChunks(track, 50)) {   // (the tick length only places chunks; levels do not depend on it)
+    const buf = micChunkPcm(c);
+    for (let o = 0; o + FRAME <= buf.length; o += FRAME) { let s = 0; for (let i = o; i < o + FRAME; i++) s += Math.abs(buf[i]); lv.push(s / FRAME); }
   }
   if (!lv.length) return 0;
   lv.sort((a, b) => a - b);

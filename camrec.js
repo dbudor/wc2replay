@@ -22,6 +22,7 @@
 //          started; mods 2 = Shift: adds to the selection), 33 drag box down (a, b = the mouse)
 // Tick = g_TickCount, the same counter the replay advances, so a sample belongs at tick + ms / tickMs.
 import { udpDatagrams } from './pcap.js';
+import { opusDecoder } from './opus.js';
 
 export const CAM_PORT = 34755;
 const MAGIC = [0x57, 0x32, 0x43, 0x4d];      // W2CM
@@ -120,6 +121,11 @@ export function parsePacket(p) {
     const n = dv.getUint16(28, true), flags = dv.getUint16(22, true);
     d.audio = { tick: dv.getUint32(16, true), ms: dv.getUint16(20, true), start: !!(flags & 1), end: !!(flags & 2),
       sample: dv.getUint32(24, true), n, pred: dv.getInt16(30, true), index: Math.min(88, p[32]), data: p.subarray(36, 36 + ((n + 1) >> 1)) };
+  } else if (d.kind === 7 && p.length >= 37) {   // Opus: up to 5 packets of 20 ms, their lengths at 32..36, data from 37
+    const flags = dv.getUint16(22, true), nf = Math.min(5, p[30]), frames = [];
+    for (let i = 0, at = 37; i < nf; i++) { const l = p[32 + i]; if (at + l > p.length) break; frames.push(p.subarray(at, at + l)); at += l; }
+    d.audio = { tick: dv.getUint32(16, true), ms: dv.getUint16(20, true), start: !!(flags & 1), end: !!(flags & 2),
+      sample: dv.getUint32(24, true), n: frames.length * 320, opus: frames };
   }
   return d;
 }
@@ -273,6 +279,7 @@ const IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 3
 const IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
 // One block (IMA ADPCM, low nibble first, from its own start state) into out[off..off+n) as -1..1 floats.
 export function adpcmDecode(a, out, off = 0) {
+  if (a.opus) { out.fill(0, off, off + a.n); return; }   // (Opus blocks: micChunkPcm)
   let pred = a.pred, index = a.index;
   for (let i = 0; i < a.n; i++) {
     const byte = a.data[i >> 1] || 0, code = i & 1 ? byte >> 4 : byte & 15;
@@ -289,7 +296,7 @@ export function adpcmDecode(a, out, off = 0) {
 export function buildMicTracks(packets, camTracks = new Map()) {
   const by = new Map();
   for (const raw of packets) {
-    if (raw[5] !== 4 && raw[5] !== 5) continue;
+    if (raw[5] !== 4 && raw[5] !== 5 && raw[5] !== 7) continue;
     const d = parsePacket(raw), k = `${d.player}:${d.session}`;
     let s = by.get(k); if (!s) by.set(k, s = { player: d.player, session: d.session, info: null, infoSeq: -1, blocks: new Map() });
     if (d.mic && d.seq >= s.infoSeq) { s.info = d.mic; s.infoSeq = d.seq; }
@@ -330,9 +337,25 @@ export function micChunks(track, tickMs) {
   }
   return out;
 }
-// A chunk's samples (-1..1).
+// A chunk's samples (-1..1). Opus blocks (kind 7) decode with one decoder per stretch of speech (reset where the
+// stretch starts; a chunk that continues one is primed with the previous chunk's last block) and come out
+// OPUS_DELAY samples late, which is taken off, so they line up on the microphone clock as ADPCM does.
+export const OPUS_DELAY = 104;   // libopus at 16 kHz, VOIP: 6.5 ms
 export function micChunkPcm(chunk) {
-  const out = new Float32Array(chunk.n); let o = 0;
-  for (const b of chunk.blocks) { adpcmDecode(b, out, o); o += b.n; }
+  const out = new Float32Array(chunk.n), tmp = new Float32Array(5760);
+  let o = 0, op = null;   // the Opus stream: decoded sample d -> out[op.base + d - OPUS_DELAY]
+  const put = n => { for (let i = 0; i < n; i++) { const k = op.base + op.d + i - OPUS_DELAY; if (k >= 0 && k < out.length) out[k] = tmp[i]; } op.d += n; };
+  for (const b of chunk.blocks) {
+    if (b.opus) {
+      if (!op || b.start || op.next !== o) {
+        opusDecoder.reset(); op = { base: o, d: 0 };
+        const prev = o === 0 && !b.start && chunk.cont && chunk.cont.blocks[chunk.cont.blocks.length - 1];
+        if (prev && prev.opus) { op.base -= prev.n; for (const f of prev.opus) put(opusDecoder.decode(f, tmp, 0)); }
+      }
+      for (const f of b.opus) put(opusDecoder.decode(f, tmp, 0));
+      op.next = o + b.n;
+    } else { adpcmDecode(b, out, o); op = null; }
+    o += b.n;
+  }
   return out;
 }
