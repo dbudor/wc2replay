@@ -136,8 +136,9 @@ export function parseCapture(bytes, { port = 34754 } = {}) {
   return packetsInfo(P, port);
 }
 // The peers, the start packet and the lobby's settings of War2 packets P (war2Packet), as parseCapture returns them.
-// livecap.js calls it with the packets up to the start packet.
-export function packetsInfo(P, port = 34754) {
+// livecap.js calls it with the packets up to the start packet; known (src -> name, Uint8Array) holds the names its
+// earlier lobbies saw: a player who stayed in the lobby between games does not announce their name again.
+export function packetsInfo(P, port = 34754, known = null) {
   const notGame = why => new CaptureError(`not a Warcraft II IPX game capture: ${why}`);
   let n1 = 0; for (const p of P) n1 += p.mode;
   const extended = n1 > P.length - n1 ? 1 : 0;
@@ -170,6 +171,7 @@ export function packetsInfo(P, port = 34754) {
       if (pr[0] === 1) { let nm = pr.subarray(0x18, 0x24); const z = nm.indexOf(0); if (z >= 0) nm = nm.subarray(0, z); names.set(pr[1], nm); caps.set(pr[1], pr[4]); }
     }
   }
+  if (known) for (const pe of peers) if (!names.get(pe).length && known.get(ipOf.get(pe))) names.set(pe, known.get(ipOf.get(pe)));
   const mapCrc = dv.getUint32(0xc, true);
   return {
     P, si, port, extended, peerOf, nodeOf, peers, ipOf, host: start[1], start, settings, race, caps, names,

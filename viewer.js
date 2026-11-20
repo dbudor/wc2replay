@@ -76,7 +76,7 @@ import { loadTileset } from './tileset.js';
 import { MapRenderer, FogTracker } from './render.js';
 import { readUnits, readPlayers, tickMs, A } from './gamestate.js';
 import { GameAudio, ALT_SOUND, HK } from './audio.js';
-import { loadScreenArt, parseMatch, lobbyInfo, renderLobby, lobbyStartButton, outroData, renderOutro, outroStatsButton, outcome, playerStats, GameTracker, OUTCOME_TEXT, Surface } from './screens.js';
+import { loadScreenArt, parseMatch, lobbyInfo, liveLobbyModel, renderLobby, lobbyStartButton, outroData, renderOutro, outroStatsButton, outcome, playerStats, GameTracker, OUTCOME_TEXT, Surface } from './screens.js';
 import { camPacketsFromCapture, camPacketsFromW2c, camPacketsFromW2r, withCamChunk, buildTracks, camAt, inputAt, trackGeometry, mouseTarget, loadCursor, isW2c, buildMicTracks, MIC_STATES } from './camrec.js';
 import { MicPlayer } from './micplay.js';
 import { opusInit, opusReady } from './opus.js';
@@ -639,7 +639,7 @@ async function liveRelays() {
 async function refreshLive() {
   const found = [];
   for (const r of await liveRelays()) {
-    try { found.push(...(await listLive(r)).filter(g => !g.done || Date.now() - (g.updated || 0) < 6 * 3600e3)); }
+    try { found.push(...(await listLive(r)).filter(g => g.state !== 'closed' && (!g.done || Date.now() - (g.updated || 0) < 6 * 3600e3))); }
     catch { /* not a relay / unreachable */ }
   }
   liveGames = found;
@@ -651,13 +651,56 @@ function addLiveOptions() {
   if (!liveGames.length) return;
   const g = document.createElement('optgroup'); g.className = 'live'; g.label = 'Live games';
   const hm = t => t ? new Date(t).toTimeString().slice(0, 5) : '';
-  liveGames.forEach((x, i) => g.appendChild(new Option(`${x.done ? '' : '● '}${x.title ? x.title + ': ' : ''}${x.map || x.id} · ${(x.players || []).join(', ')} · ${x.done ? 'ended' : 'live'}${x.started ? ' since ' + hm(x.started) : ''}`, `live:${i}`)));
+  liveGames.forEach((x, i) => g.appendChild(new Option(x.state === 'lobby'
+    ? `○ ${x.title ? x.title + ': ' : ''}lobby · ${x.map || 'no map yet'} · ${(x.players || []).join(', ')}${x.started ? ' · since ' + hm(x.started) : ''}`
+    : `${x.done ? '' : '● '}${x.title ? x.title + ': ' : ''}${x.map || x.id} · ${(x.players || []).join(', ')} · ${x.done ? 'ended' : 'live'}${x.started ? ' since ' + hm(x.started) : ''}`, `live:${i}`)));
   sel.insertBefore(g, sel.options[1] || null);
   ui.listBox.hidden = false;
   if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
 }
 setInterval(() => { if (!document.hidden) refreshLive(); }, 20000);
-function stopLive() { if (picked.live) { picked.live.stop(); picked.live = null; } ui.liveBtn.hidden = true; }
+function stopLive() { stopLiveLobby(); if (picked.live) { picked.live.stop(); picked.live = null; } ui.liveBtn.hidden = true; }
+// A live game still in its lobby (w2live publishes it under the game's id; livecap.js LobbyTracker): the chat room
+// as it fills, from the relay's list every 2 s, until the game's first bytes arrive (openLive then starts it).
+let liveLobby = null;   // { relay, id, src, img, lines, timer }
+function stopLiveLobby() { if (liveLobby) { clearTimeout(liveLobby.timer); liveLobby = null; } }
+function surfaceCanvas(surf) {
+  const c = createCanvas(640, 480), ctx = c.getContext('2d'), id = ctx.createImageData(640, 480);
+  id.data.set(surf.data); ctx.putImageData(id, 0, 0); return c;
+}
+function drawLiveLobby() {
+  const me = liveLobby; if (!me) return;
+  const ctx = ui.view.getContext('2d'), W = ui.view.width, H = ui.view.height, d = window.devicePixelRatio || 1;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  if (me.img) {
+    const k = Math.min(W / 640, H / 480), w = Math.round(640 * k), h = Math.round(480 * k);
+    ctx.imageSmoothingEnabled = k < 1; ctx.drawImage(me.img, 0, 0, 640, 480, Math.round((W - w) / 2), Math.round((H - h) / 2), w, h);
+  } else {
+    ctx.fillStyle = '#fce05c'; ctx.font = `${Math.round(15 * d)}px Georgia, serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    (me.lines || ['Waiting for the lobby...']).forEach((t, i) => ctx.fillText(t, 20 * d, (20 + 24 * i) * d));
+  }
+}
+async function showLiveLobby(relay, id, src) {
+  stopLiveLobby();
+  const me = liveLobby = { relay, id, src, img: null, lines: null, timer: 0 };
+  try { await ensureGameData(); } catch { /* text only */ }
+  const tick = async () => {
+    if (liveLobby !== me || src.headReady) return;
+    let g = null; try { g = (await listLive(relay)).find(x => x.id === id); } catch { /* again */ }
+    if (liveLobby !== me || src.headReady) return;
+    if (g && g.state === 'closed') { stopLive(); setStatus('That lobby closed without a game.'); return; }
+    if (g && g.lobby) {
+      const L = liveLobbyModel(st.art || loadScreenArt(() => null), g.lobby);
+      me.img = st.art && st.art.lobbyOk ? surfaceCanvas(renderLobby(st.art, L)) : null;
+      me.lines = [`Lobby: ${L.mapTitle}${L.mapSize ? ` (${L.mapSize}x${L.mapSize})` : ''}, ${L.mode}`,
+        ...L.slots.filter(x => x.kind === 'human').map(x => `${x.name}: ${x.info}, player ${x.k + 1}`), 'the game starts here when the host starts it'];
+      setStatus(`Live lobby${g.title ? ' (' + g.title + ')' : ''}: ${(g.players || []).join(', ')}. The game starts here when the host starts it.`);
+      drawLiveLobby();
+    }
+    me.timer = setTimeout(tick, 2000);
+  };
+  tick();
+}
 const liveTurns = () => picked.live ? (picked.live.ended ? replayTurnCount(picked.live.bytes) : picked.live.turns) : null;
 async function openLive(relay, id) {
   stopLive();
@@ -666,8 +709,10 @@ async function openLive(relay, id) {
   const src = new LiveSource(relay, id);
   picked.live = src; src.onData = () => liveData(src); src.start();
   setStatus(`Live game ${id}: waiting for ${relay}…`);
+  showLiveLobby(relay, id, src);   // (a game still in its lobby: shown until it starts)
   try {
     await src.ready();
+    stopLiveLobby();
     if (picked.live !== src) return;
     Object.assign(picked, { replay: src.bytes, replayName: `live: ${id}`, listName: null, capture: null, converted: null, camCapture: [], balloons: null });
     await start({ intro: false });
@@ -1144,6 +1189,7 @@ window.addEventListener('keydown', e => {
 
 function frame(t) {
   requestAnimationFrame(frame);
+  if (liveLobby) return;   // a live lobby is up (drawLiveLobby), not the previous game
   if (!st.session || st.loading) return;
   document.body.classList.toggle('screenUp', !!st.screen);   // lobby / end screen: the floating panels step aside
   if (st.busy) { st.lastT = 0; drawBusy(); return; }   // seeking: no map, a running indicator
@@ -1202,7 +1248,8 @@ function resize() {
   const r = ui.wrap.getBoundingClientRect(), d = window.devicePixelRatio || 1;
   const c = st.session && (st.viewWant || viewCentre());
   ui.view.width = Math.round(r.width * d); ui.view.height = Math.round(r.height * d);
-  if (c) centreOn(c.x, c.y);   // keep the intended centre (not the edge-clamped one) when the canvas changes size
+  if (c) centreOn(c.x, c.y);
+  if (liveLobby) drawLiveLobby();   // keep the intended centre (not the edge-clamped one) when the canvas changes size
 }
 // Free (non-player-view) camera centre in map pixels.
 const viewCentre = () => ({ x: st.view.x + ui.view.width / st.view.scale / 2, y: st.view.y + ui.view.height / st.view.scale / 2 });

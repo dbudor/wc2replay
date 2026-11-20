@@ -261,9 +261,20 @@ export function loadScreenArt(getFile) {
 // ---------------------------------------------------------------- lobby model for the intro
 // M = parseMatch(w2r), m = arena right after the boot, rgbOf(colourIdx) = tileset palette rgb (in-game colour).
 const PLAYER_RACE = 0x4abd28, PLAYER_COLOR = 0x4a48bc, MAP_SIZE = 0x4acbdc, GAME_SPEED = 0x4d6ae8;
+// The lobby's options as the chat room names them (Lobby_ApplySettings 0x4125c0), from the settings' options word.
+function lobbyOptions(T, opt) {
+  const pick = (map, v) => map[v] !== undefined ? T(map[v]) : '';
+  return {
+    resources: pick({ 0: 0xb, 0x1000: 0xc, 0x2000: 0xd, 0x3000: 0xe, 0x20000: 0x12 }, opt & 0x23000),
+    location: T(opt & 0x400 ? 0x11 : 0x12),
+    units: T(opt & 0x200 ? 0x13 : 0xb),
+    fog: T(opt & 0x100 ? 0x10 : 0xf),
+    tileset: pick({ 0: 0xb, 0x4000: 0x16, 0x8000: 0x17, 0xc000: 0x18, 0x14000: 0x12, 0x1c000: 0x23 }, opt & 0x1c000),
+    cheats: T(opt & 0x800 ? 0x19 : 0x1a),
+  };
+}
 export function lobbyInfo(M, m, art, rgbOf) {
   const T = art.chatTbl, opt = M.options;
-  const pick = (map, v) => map[v] !== undefined ? T(map[v]) : '';
   const raceName = r => r === 0 ? T(20) : r === 1 ? T(21) : T(11);
   const mapTitle = M.mapName || (M.pudName || '').replace(/^builtin:0x[0-9a-f]+ /i, '').replace(/^.*[\\/]/, '').replace(/\.pud$/i, '');
   const sp = m.r32(GAME_SPEED);
@@ -272,14 +283,7 @@ export function lobbyInfo(M, m, art, rgbOf) {
     scenarioKind: T(M.pudSize ? 2 : 1),                 // chatroom.tbl: Built-in / Custom scenario
     mode: M.extended ? 'Enhanced' : 'Classic',
     speed: art.gluTbl(82 + sp) || `speed ${sp}`,
-    options: {                                         // Lobby_ApplySettings 0x4125c0
-      resources: pick({ 0: 0xb, 0x1000: 0xc, 0x2000: 0xd, 0x3000: 0xe, 0x20000: 0x12 }, opt & 0x23000),
-      location: T(opt & 0x400 ? 0x11 : 0x12),
-      units: T(opt & 0x200 ? 0x13 : 0xb),
-      fog: T(opt & 0x100 ? 0x10 : 0xf),
-      tileset: pick({ 0: 0xb, 0x4000: 0x16, 0x8000: 0x17, 0xc000: 0x18, 0x14000: 0x12, 0x1c000: 0x23 }, opt & 0x1c000),
-      cheats: T(opt & 0x800 ? 0x19 : 0x1a),
-    },
+    options: lobbyOptions(T, opt),
     yourRace: raceName(M.race[M.localPlayer]),
     slots: [],
   };
@@ -290,6 +294,25 @@ export function lobbyInfo(M, m, art, rgbOf) {
     else Object.assign(s, { kind: bits === 1 ? 'computer' : bits === 2 ? 'closed' : 'open', name: T(bits === 1 ? 7 : bits === 2 ? 8 : 6), lobbyRace: raceName(M.race[p]),
       inGame: m.r8(PT + p) === 1 });                   // a computer slot the map has no start for is "nobody" in game
     L.slots.push(s);
+  }
+  return L;
+}
+
+// The live lobby (w2live; livecap.js LobbyTracker snapshot: players by peer number with names, the host's settings)
+// as renderLobby's model. Races are not sent before the start; slot colours are the players' standard ones.
+const SLOT_RGB = [[164, 0, 0], [0, 60, 192], [44, 180, 148], [152, 72, 176], [248, 140, 20], [40, 40, 60], [224, 224, 224], [252, 252, 72]];
+export function liveLobbyModel(art, lb) {
+  const T = art.chatTbl, opt = lb.options >>> 0, bits = lb.slotBits >>> 0;
+  const L = {
+    extended: !!lb.extended, mapTitle: (lb.map || 'choosing a map...').replace(/\.pud$/i, ''), mapSize: lb.mapSize || 0,
+    scenarioKind: T(lb.custom ? 2 : 1), mode: lb.extended ? 'Enhanced' : 'Classic', speed: '', options: lobbyOptions(T, opt), yourRace: '',
+    readyText: 'Live lobby: the game starts here when the host starts it', button: 'Waiting...', slots: [],
+  };
+  for (let k = 0; k < 8; k++) {
+    const pl = (lb.players || []).find(x => x.peer === k), b = (bits >> 2 * k) & 3;
+    if (pl) L.slots.push({ k, p: k, kind: 'human', name: pl.name || `player ${k + 1}`, color: SLOT_RGB[k], host: pl.host,
+      info: pl.host ? 'host' : k === 0 || (opt & 1 << k) ? 'ready' : 'not ready' });
+    else L.slots.push({ k, p: k, kind: b === 1 ? 'computer' : b === 2 ? 'closed' : 'open', name: T(b === 1 ? 7 : b === 2 ? 8 : 6), color: SLOT_RGB[k], inGame: b === 1, info: b === 1 ? 'computer' : '' });
   }
   return L;
 }
@@ -345,7 +368,7 @@ export function renderLobby(art, L) {
   };
   for (const c of D.ctrls) {
     if (!c.text || !(c.id === -1 || /^Ready/.test(c.text))) continue;
-    put(c, /^Ready/.test(c.text) ? 'Recorded game: press Play (or Start replay) to start' : c.text);
+    put(c, /^Ready/.test(c.text) ? L.readyText || 'Recorded game: press Play (or Start replay) to start' : c.text);
   }
   for (const sl of L.slots) {
     const nameC = by(20 + sl.k), infoC = by(12 + sl.k), colC = by(43 + sl.k);
@@ -353,7 +376,8 @@ export function renderLobby(art, L) {
     if (nameC) put(nameC, sl.name, { pad: 4, set: 4 });   // as the game: names and "Available" in the label white, on the parchment
     if (infoC) {
       let t = '';
-      if (occupied) {
+      if (sl.info !== undefined) t = occupied ? sl.info : '';
+      else if (occupied) {
         const actual = sl.race === 1 ? 'Orc' : 'Human';
         t = sl.lobbyRace === actual ? actual : `${sl.lobbyRace} (${actual})`;
         const rec = [sl.mic && 'mic', sl.cam && 'camera'].filter(Boolean).join(', ');   // CamRec recordings (set by the viewer)
@@ -371,11 +395,11 @@ export function renderLobby(art, L) {
   const sc = by(11);
   if (sc) {
     const f = ctrlFont(F, sc);
-    [`${L.scenarioKind}: ${L.mapTitle}`, `Map ${L.mapSize}x${L.mapSize}, ${L.mode}, speed ${L.speed}`, L.rules && `Rules: ${L.rules}`].filter(Boolean)
+    [`${L.scenarioKind}: ${L.mapTitle}`, [L.mapSize && `Map ${L.mapSize}x${L.mapSize}`, L.mode, L.speed && `speed ${L.speed}`].filter(Boolean).join(', '), L.rules && `Rules: ${L.rules}`].filter(Boolean)
       .forEach((t, i) => put(sc, t, { y: sc.t + 2 + i * (f.maxH + 4), set: 4 }));
   }
   const lv = by(1);
-  if (lv) button(s, ctrlFont(F, lv), lv, 'Start replay', R[2], pal);
+  if (lv) button(s, ctrlFont(F, lv), lv, L.button || 'Start replay', R[2], pal);
   return s;
 }
 // where the lobby's "Start replay" button is (640x480 screen coordinates)

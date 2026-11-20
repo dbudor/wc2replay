@@ -92,10 +92,49 @@ export class PcapStream {
 // push(datagram) every UDP datagram of the capture in order; finish() at its end (or the game's): writes the turns
 // left with the whole-capture rules (gameEnd) and returns { nturns, localQuit, leave, mismatch } (mismatch: a peer
 // that left differently from what the live turns assumed: those turns differ from the whole capture's).
+// The lobby as it is before the game starts, from its packets (pcap.js packetsInfo reads the same ones at the start):
+//   - the host: the PC answering with type-5 adverts / sending the type-0x13 settings (map name from 0x18, the
+//     start packet's settings layout before it: map width [1], slot bits [4..8], options [8..0xc] with each slot's
+//     ready bit, map crc [0xc..0x10]);
+//   - the players present: peer-numbered packets (w[1] == w[2] < 8) within LOBBY_GONE_S;
+//   - names: adverts / joins (0x1e) and the setup records (0xd: name 0x18 of the record), kept in `known` (src ->
+//     name) across lobbies, as someone who stays for the next game does not announce theirs again.
+// snapshot() -> null (no lobby seen) or { extended, map, mapSize, slotBits, options, custom, players: [{ peer, name, host }] }.
+export const LOBBY_GONE_S = 8;
+const cstr = (w, o, n) => { let s = w.subarray(o, o + n); const z = s.indexOf(0); return z >= 0 ? s.subarray(0, z) : s; };
+const latin1d = new TextDecoder('latin1');
+export class LobbyTracker {
+  constructor(known = new Map()) { this.known = known; this.peers = new Map(); this.hostSrc = null; this.settings = null; this.map = ''; this.n = 0; this.n1 = 0; this.last = 0; }
+  push(p) {
+    const w = p.pkt, ty = w[6];
+    this.n++; this.n1 += p.mode; this.last = p.ts;
+    if (w[1] < 8 && w[1] === w[2]) { const e = this.peers.get(p.src); if (e) { e.peer = w[1]; e.last = p.ts; } else this.peers.set(p.src, { peer: w[1], last: p.ts }); }
+    if ((ty === 5 || ty === 9 || ty === 0xa || ty === 0xb || ty === 6) && w.length >= 0x24) {
+      const nm = cstr(w, 0x1e, 12); if (nm.length) this.known.set(p.src, nm.slice());
+      if (ty === 5) this.hostSrc = p.src;
+    }
+    if (ty === 0xd && w.length >= 0x40 && w[8] === 1) {   // a setup record: the name of the player with that peer number
+      const pe = w[9], nm = cstr(w, 8 + 0x18, 12);
+      for (const [src, e] of this.peers) if (e.peer === pe && nm.length) this.known.set(src, nm.slice());
+    }
+    if (ty === 0x13 && w.length > 0x18) { this.hostSrc = p.src; this.settings = w.slice(8, 0x18); let o = 0x18; while (o < w.length && w[o] && (w[o] < 0x20 || w[o] > 0x7e)) o++; this.map = latin1d.decode(cstr(w, o, 0x20)); }
+  }
+  snapshot(now = this.last) {
+    if (!this.hostSrc && !this.peers.size) return null;
+    const dv = this.settings && new DataView(this.settings.buffer, this.settings.byteOffset, 16), name = src => latin1d.decode(this.known.get(src) || new Uint8Array(0));
+    const players = [...this.peers].filter(([, e]) => now - e.last <= LOBBY_GONE_S).map(([src, e]) => ({ peer: e.peer, name: name(src), host: src === this.hostSrc }));
+    if (this.hostSrc && !players.some(x => x.host)) players.push({ peer: 0, name: name(this.hostSrc), host: true });   // alone: only adverts so far
+    players.sort((a, b) => a.peer - b.peer);
+    return { extended: this.n1 > this.n - this.n1 ? 1 : 0, map: this.map, mapSize: this.settings ? this.settings[1] : 0,
+      slotBits: dv ? dv.getUint32(4, true) : 0, options: dv ? dv.getUint32(8, true) : 0, custom: dv ? dv.getUint32(0xc, true) !== 0 : false, players };
+  }
+}
+
 export class LiveConverter {
   constructor(opts = {}) {
-    this.o = { peer: 'host', rules: 0, pud: () => null, dropLead: 10, lookahead: 3, ...opts };
+    this.o = { peer: 'host', rules: 0, pud: () => null, dropLead: 10, lookahead: 3, known: new Map(), ...opts };
     this.P = []; this.state = 'lobby'; this.k = 0; this.cams = 0;
+    this.lobby = new LobbyTracker(this.o.known);
   }
   push(d) {
     if (d.dp === CAM_PORT) { if (isCamPacket(d.pl)) { this.cams++; this.o.onCam?.(d.pl.slice()); } return; }
@@ -105,6 +144,7 @@ export class LiveConverter {
     const i = this.P.push(p) - 1;
     if (this.state === 'lobby') {
       const w = p.pkt;
+      this.lobby.push(p);
       if (w[6] === 0x15 && w[1] === w[2] && w[2] < 8) this.started();
       return;
     }
@@ -113,7 +153,7 @@ export class LiveConverter {
   }
   // the start packet: the lobby's settings from the packets so far; turn streams from the start of the capture
   started() {
-    const cap = this.cap = packetsInfo(this.P);
+    const cap = this.cap = packetsInfo(this.P, undefined, this.o.known);
     this.local = this.o.peer === null || this.o.peer === undefined || this.o.peer === 'host' ? cap.host : +this.o.peer;
     if (!cap.peers.includes(this.local)) throw new CaptureError(`peer ${this.local} is not in the capture (peers: ${cap.peers.join(', ')})`);
     this.stream = new Map(cap.peers.map(pe => [pe, []])); this.tsOf = new Map(cap.peers.map(pe => [pe, []]));

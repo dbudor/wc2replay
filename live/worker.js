@@ -182,6 +182,9 @@ export class LiveGame {
       const t = Date.now();
       for (let o = 0; o < raw.length; o += PIECE) this.sql.exec('INSERT INTO piece (start, t, data) VALUES (?, ?, ?)', size + o, t, raw.subarray(o, Math.min(raw.length, o + PIECE)));
       this.push();
+      if (t - (this.get('listed') || 0) > 30000) {   // the list's size / updated: at most every 30 s (each is a request)
+        this.set('listed', t); await this.index('put', { id, meta: this.get('meta'), size: this.size, done: this.done() });
+      }
       return json({ size: size + raw.length });
     }
     if (act === 'final') {

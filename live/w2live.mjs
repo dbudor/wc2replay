@@ -9,8 +9,9 @@
 // It runs at below-normal priority and never waits on the network: a slow relay only delays the viewers.
 //
 //   node w2live.mjs [--config w2live.json] [--game DIR] [--iface N ...] [--out DIR] [--relay URL --token T]
-//   node w2live.mjs --pcap FILE [--speed X]     a recorded capture fed at X times its speed from the game's start
-//                                              (the lobby at once; 0: all at once; tests and demos)
+//   node w2live.mjs --pcap FILE [--speed X] [--lobby-speed Y]   a recorded capture fed at X times its speed from
+//                                              the game's start (0: all at once), its lobby at Y (default 0: at
+//                                              once); tests and demos
 //   node w2live.mjs --list-ifaces
 // w2live.json (next to this script, all optional): { "game": "C:\\War2Combat", "dumpcap": "...\\dumpcap.exe",
 //   "iface": ["1"] (dumpcap -D numbers; none: all, keeping the first that carries the game), "out": "recordings", "peer": "host", "rules": null, "relay": { "url": "https://...", "token": "..." },
@@ -99,7 +100,8 @@ function findPud(cap) {
 // ---- relay: one copy of the stream goes up (a request every UPLOAD_MS at most); viewers read it there
 const UPLOAD_MS = 1500;
 class Uploader {
-  constructor(id, meta) { this.id = id; this.meta = meta; this.buf = []; this.len = 0; this.sent = 0; this.busy = false; this.done = false; this.wait = 1000; this.final = null; this.closed = false; }
+  constructor(id, meta) { this.id = id; this.meta = meta; this.metaVer = 1; this.metaSentVer = 0; this.buf = []; this.len = 0; this.sent = 0; this.busy = false; this.done = false; this.wait = 1000; this.final = null; this.closed = false; }
+  setMeta(meta) { this.meta = meta; this.metaVer++; this.kick(); }   // the lobby changed / the game started
   write(b) { this.buf.push(b); this.len += b.length; this.kick(); }
   url(p) { return `${C.relay.url.replace(/\/$/, '')}/api/live/${encodeURIComponent(this.id)}${p}`; }
   async req(p, body, type) {
@@ -111,7 +113,7 @@ class Uploader {
   async run() {
     for (;;) {
       try {
-        if (!this.metaSent) { await this.req('/meta', JSON.stringify(this.meta), 'application/json'); this.metaSent = true; }
+        if (this.metaSentVer !== this.metaVer) { const v = this.metaVer; await this.req('/meta', JSON.stringify(this.meta), 'application/json'); this.metaSentVer = v; continue; }
         if (this.sent < this.len) {
           const due = (this.last || 0) + UPLOAD_MS - Date.now(); if (due > 0 && !this.done) await new Promise(r => setTimeout(r, due));   // one request per UPLOAD_MS
           this.last = Date.now();
@@ -138,20 +140,54 @@ class Uploader {
 // ---- one game: recorder + live file + uploader
 fs.mkdirSync(C.out, { recursive: true });
 const stamp = ts => { const d = new Date(ts * 1000), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; };
+// The names each PC used in this evening's lobbies (src -> name): someone who stays in the lobby for the next game
+// does not announce theirs again (livecap.js LobbyTracker, pcap.js packetsInfo).
+const KNOWN_NAMES = new Map();
+const LOBBY_POST_MS = 2000;   // lobby updates to the relay at most this often
+const LOBBY_QUIET_S = 45;     // a lobby with no packets this long, and no game: closed
 class Game {
   constructor() {
-    this.rec = new LiveRecorder({ peer: C.peer, rules, pud: findPud, fixtx: (head, pud) => LiveFixtx.create({ module, exe, files, head, pud }), write: b => this.write(b) });
+    this.rec = new LiveRecorder({ peer: C.peer, rules, known: KNOWN_NAMES, pud: findPud, fixtx: (head, pud) => LiveFixtx.create({ module, exe, files, head, pud }), write: b => this.write(b) });
     this.pending = []; this.lastTurnAt = 0; this.over = null;
+    this.lobbyKey = ''; this.lobbyAt = 0; this.lobbyTimer = null; this.lobbyClosedAt = -Infinity;
+  }
+  // The lobby, while the game has not started: published under the id the game will have (viewers watch it fill).
+  lobby(now) {
+    const c = this.rec.conv;
+    if (c.state !== 'lobby' || !(C.relay && C.relay.url) || c.lobby.last <= this.lobbyClosedAt) return;
+    const L = c.lobby.snapshot(c.lobby.last); if (!L) return;
+    if (now - c.lobby.last > LOBBY_QUIET_S) {   // nobody there any more
+      if (this.up) { this.up.setMeta({ ...this.up.meta, state: 'closed', lobby: null }); this.up.finish(null); log(`lobby closed: ${this.id}`); }
+      this.up = null; this.id = null; this.lobbyKey = ''; this.lobbyClosedAt = c.lobby.last;
+      return;
+    }
+    if (!this.id) {
+      this.id = `${stamp(c.lobby.last)}-lobby-${Math.random().toString(36).slice(2, 6)}`;
+      log(`lobby: ${this.id} (${L.players.map(x => x.name || '?').join(', ')})`);
+    }
+    const key = JSON.stringify(L);
+    if (key === this.lobbyKey) return;
+    const due = this.lobbyAt + LOBBY_POST_MS - Date.now();
+    if (due > 0) { if (!this.lobbyTimer) this.lobbyTimer = setTimeout(() => { this.lobbyTimer = null; this.lobby(now + due / 1000); }, due); return; }
+    this.lobbyKey = key; this.lobbyAt = Date.now();
+    const meta = { title: C.title, map: L.map, players: L.players.map(x => x.name || `peer ${x.peer}`), delay: C.delay, rules, started: Date.now(), host: os.hostname(), state: 'lobby', lobby: L };
+    if (this.up) this.up.setMeta({ ...meta, started: this.up.meta.started }); else this.up = new Uploader(this.id, meta);
+    this.up.kick();
   }
   write(b) {
-    if (!this.id) {   // the header: the game has started
+    if (!this.fileId) {   // the header: the game has started
       const cap = this.rec.conv.cap;
-      this.id = `${stamp(this.rec.conv.lastTs || Date.now() / 1000)}-${cap.mapName.replace(/\.pud$/i, '').replace(/[^\w.-]+/g, '_') || 'game'}-${Math.random().toString(36).slice(2, 6)}`;
+      if (this.lobbyTimer) { clearTimeout(this.lobbyTimer); this.lobbyTimer = null; }
+      this.fileId = `${stamp(this.rec.conv.lastTs || Date.now() / 1000)}-${cap.mapName.replace(/\.pud$/i, '').replace(/[^\w.-]+/g, '_') || 'game'}-${Math.random().toString(36).slice(2, 6)}`;
+      if (!this.id) this.id = this.fileId;   // (no lobby published: the relay's id is the file's)
       this.players = cap.peers.map(pe => cap.peerNames[pe] || `peer ${pe}`);
       log(`game started: ${this.id} (${cap.mapName}, ${this.players.join(', ')})`);
-      this.gz = zlib.createGzip(); this.gz.pipe(fs.createWriteStream(path.join(C.out, `${this.id}.live.w2r.gz`)));
+      this.gz = zlib.createGzip(); this.gz.pipe(fs.createWriteStream(path.join(C.out, `${this.fileId}.live.w2r.gz`)));
       this.flusher = setInterval(() => this.gz.flush(zlib.constants.Z_SYNC_FLUSH), 1000);
-      if (C.relay && C.relay.url) this.up = new Uploader(this.id, { title: C.title, map: cap.mapName, players: this.players, delay: C.delay, rules, started: Date.now(), host: os.hostname() });
+      if (C.relay && C.relay.url) {
+        const meta = { title: C.title, map: cap.mapName, players: this.players, delay: C.delay, rules, started: Date.now(), host: os.hostname(), state: 'game' };
+        if (this.up) this.up.setMeta({ ...meta, started: this.up.meta.started }); else this.up = new Uploader(this.id, meta);
+      }
     }
     this.gz.write(b); if (this.up) this.up.write(b);
   }
@@ -160,8 +196,9 @@ class Game {
     try { res = await this.rec.done(); } catch (e) { log(`game ${this.id || '(not started)'}: conversion failed: ${e.message}`); }
     if (this.flusher) clearInterval(this.flusher);
     if (this.gz) await new Promise(r => this.gz.end(r));
-    if (!res) { if (this.up) this.up.finish(null); return; }
-    const gz = zlib.gzipSync(res.w2r, { level: 9 }), f = path.join(C.out, `${this.id}.w2r.gz`);
+    if (this.lobbyTimer) { clearTimeout(this.lobbyTimer); this.lobbyTimer = null; }
+    if (!res) { if (this.up) { if (!this.fileId) this.up.setMeta({ ...this.up.meta, state: 'closed', lobby: null }); this.up.finish(null); } return; }
+    const gz = zlib.gzipSync(res.w2r, { level: 9 }), f = path.join(C.out, `${this.fileId}.w2r.gz`);
     fs.writeFileSync(f, gz);
     const st = res.info.stats, m = res.info.mismatch;
     log(`game over (${why}): ${f}, ${res.info.turns} turns, ${(gz.length / 1e6).toFixed(1)} MB${res.info.gameOver ? '' : ' (no victory / defeat: a player left or the capture ended)'}${m ? `; WARNING: live leave decisions differed (${JSON.stringify(m)}): convert the .pcapng in the viewer` : ''}`);
@@ -188,6 +225,7 @@ async function handle(frames) {
     if (tail) tail.push(d);
     game.rec.push(d);
     const c = game.rec.conv;
+    if (c.state === 'lobby') game.lobby(d.ts);
     if (c.state === 'game' && d.dp === GAME_PORT) game.lastTurnAt = d.ts;
     if (!game.over && (game.rec.gameOver || (c.quit && c.quit.has(c.local)))) { game.over = d.ts; game.overAt = Date.now(); tail = []; }   // what follows may be the next game's lobby
     // a new game's start packet after this one ended / was left, or 20 s without game traffic after it ended
@@ -207,16 +245,18 @@ async function next(why) {
 async function stop(why) { await chain; await game.end(why); if (pcapOut) pcapOut.end(); }
 
 if (opt('--pcap')) {
-  const b = fs.readFileSync(opt('--pcap')), speed = +(opt('--speed') ?? 1);
+  const b = fs.readFileSync(opt('--pcap')), speed = +(opt('--speed') ?? 1), lobbySpeed = +(opt('--lobby-speed') ?? 0);
   log(`replaying ${opt('--pcap')} at ${speed || 'full'} speed`);
   // pieces of the capture as dumpcap would write them, in time: frame by frame through a second parser
-  const timing = new PcapStream(); let t0 = null, w0 = Date.now(), at = 0;
+  const timing = new PcapStream(); let t0 = null, w0 = Date.now(), at = 0, pace = null;
   for (let o = 0; o < b.length; o += 2048) {
     const piece = b.subarray(o, o + 2048), fr = timing.push(piece);
     if (speed && game.rec.conv.state === 'lobby') await chain;   // (handled yet?)
-    if (speed && fr.length && game.rec.conv.state !== 'lobby') {   // the lobby at full speed, the game in time
+    const x = game.rec.conv.state === 'lobby' ? lobbySpeed : speed;   // the lobby at its own speed (0: at once), the game in time
+    if (x !== pace) { pace = x; t0 = null; }
+    if (x && fr.length) {
       const ts = fr[fr.length - 1].ts; if (t0 === null) { t0 = ts; w0 = Date.now(); }
-      const due = w0 + (ts - t0) * 1000 / speed - Date.now();
+      const due = w0 + (ts - t0) * 1000 / x - Date.now();
       if (due > 5) await new Promise(r => setTimeout(r, due));
     }
     feed(piece); at += piece.length;
@@ -240,7 +280,7 @@ if (opt('--pcap')) {
   const dc = spawn(C.dumpcap, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   try { os.setPriority(dc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* as is */ }
   dc.stdout.on('data', feed);
-  setInterval(() => { chain = chain.then(() => game.over && Date.now() - game.overAt > 25000 ? next('ended') : null).catch(e => log(`error: ${e.stack || e}`)); }, 5000);   // quiet after the game
+  setInterval(() => { chain = chain.then(() => game.over && Date.now() - game.overAt > 25000 ? next('ended') : game.lobby(Date.now() / 1000)).catch(e => log(`error: ${e.stack || e}`)); }, 5000);   // quiet after the game / in the lobby
   dc.stderr.on('data', b => { const s = String(b).trim(); if (s) log(`dumpcap: ${s}`); });
   dc.on('exit', code => { log(`dumpcap exited (${code})`); stop('capture stopped').then(() => process.exit(code ? 1 : 0)); });
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { log('stopping'); dc.kill(); });

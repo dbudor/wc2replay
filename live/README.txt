@@ -46,6 +46,9 @@ Blizzard's, give the login only to people who own the game.
 
 The viewer
 ----------
+Lobbies show too, as soon as someone hosts one ("○ ... lobby"): opening one shows the chat room as it fills
+(the players as they join, their slots and ready marks, the map and the settings; races are only known at the
+start), and the game itself when the host starts it. A lobby left without a game drops off the list.
 Live games show at the top of the Replay list (relays.json next to the viewer lists the relays:
 {"relays": ["https://w2live.YOURNAME.workers.dev"]}, or add ?relay=URL to the viewer's address). Picking one
 starts at the newest turn; the red LIVE button shows when the view is at the newest turn, else how far behind it
