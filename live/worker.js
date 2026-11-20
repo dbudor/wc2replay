@@ -18,9 +18,60 @@ const json = (o, status = 200, h = {}) => new Response(JSON.stringify(o), { stat
 const text = (t, status) => new Response(t, { status, headers: CORS });
 const PIECE = 1 << 20;   // SQLite rows stay under its 2 MB value limit
 
+// ---- the game files under /game/ (Warcraft II BNE.exe, War2Dat.mpq, War2Patch.mpq: deploy.sh puts them there from
+// the deploying computer, never from git), only for the login (secrets GAME_USER, GAME_PASS). /game/login asks for
+// it (the browser's Basic prompt), sets a cookie for a year and goes back to the viewer; the other /game/ paths
+// want that cookie (or the Basic header) and answer a plain 401 otherwise (no prompt: the viewer shows a link to
+// /game/login). wrangler.toml runs this Worker first for /game/*, so the files are never served without it.
+// A file over the 25 MB asset limit is stored as <name>.part0, .part1, ... and served joined.
+const GAME_COOKIE = 'w2game';
+const PRIVATE = { 'cache-control': 'private, no-store' }, FILE_CACHE = { 'cache-control': 'private, max-age=604800' };   // (a week, in that browser only)
+const same = (a, b) => { if (a.length !== b.length) return false; let x = 0; for (let i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i); return x === 0; };
+async function gameToken(env) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`w2game:${env.GAME_USER}:${env.GAME_PASS}`));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function basicOk(req, env) {
+  const m = /^Basic\s+(\S+)$/i.exec(req.headers.get('authorization') || '');
+  if (!m) return false;
+  let s; try { s = atob(m[1]); } catch { return false; }
+  return same(s, `${env.GAME_USER}:${env.GAME_PASS}`);
+}
+async function gameFiles(req, env, ctx, url) {
+  if (!env.GAME_USER || !env.GAME_PASS || !env.ASSETS) return text('not found', 404);   // no login set up: no files
+  if (req.method !== 'GET' && req.method !== 'HEAD') return text('method', 405);
+  if (url.pathname === '/game/login') {
+    if (!basicOk(req, env)) return new Response('Warcraft II files: login needed', { status: 401, headers: { ...PRIVATE, 'www-authenticate': 'Basic realm="Warcraft II files", charset="UTF-8"' } });
+    const back = url.searchParams.get('back') || '/';
+    return new Response(null, { status: 302, headers: { ...PRIVATE, location: back.startsWith('/') && !back.startsWith('//') ? back : '/',
+      'set-cookie': `${GAME_COOKIE}=${await gameToken(env)}; Path=/game/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax` } });
+  }
+  const ck = (req.headers.get('cookie') || '').split(/;\s*/).find(c => c.startsWith(GAME_COOKIE + '='));
+  if (!(ck && same(ck.slice(GAME_COOKIE.length + 1), await gameToken(env))) && !basicOk(req, env)) return new Response('login needed', { status: 401, headers: PRIVATE });
+  const asset = (path, method) => env.ASSETS.fetch(new Request(new URL(path, url), { method }));
+  const r = await asset(url.pathname, req.method);
+  if (r.ok) { const h = new Headers(r.headers); for (const [k, v] of Object.entries(FILE_CACHE)) h.set(k, v); return new Response(r.body, { status: r.status, headers: h }); }
+  const parts = [];
+  for (let k = 0; k < 16; k++) {
+    const p = await asset(`${url.pathname}.part${k}`, 'HEAD');
+    if (!p.ok) break;
+    parts.push(`${url.pathname}.part${k}`);
+  }
+  if (!parts.length) return new Response('not found', { status: 404, headers: PRIVATE });
+  const headers = { ...FILE_CACHE, 'content-type': 'application/octet-stream' };   // (no length: sent in chunks)
+  if (req.method === 'HEAD') return new Response(null, { headers });
+  const { readable, writable } = new TransformStream();
+  ctx.waitUntil((async () => {
+    try { for (const p of parts) await (await asset(p, 'GET')).body.pipeTo(writable, { preventClose: true }); await writable.close(); }
+    catch (e) { await writable.abort(e).catch(() => {}); }
+  })());
+  return new Response(readable, { headers });
+}
+
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    if (url.pathname.startsWith('/game/')) return gameFiles(req, env, ctx, url);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
     const m = /^\/api\/live(?:\/([^/]+)(?:\/(\w+))?)?\/?$/.exec(url.pathname);
     if (!m) return text('not found', 404);

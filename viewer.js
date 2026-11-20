@@ -325,10 +325,14 @@ const GAME_NAMES = {
   dat: ['War2Dat.mpq', 'war2dat.mpq', 'WAR2DAT.MPQ', 'War2Dat.MPQ'],
   patch: ['War2Patch.mpq', 'war2patch.mpq', 'WAR2PATCH.MPQ', 'War2Patch.MPQ'],
 };
+let gameLogin = null;   // the server has the game files behind a login (the Cloudflare Worker): its login page
 async function findGameFile(dir, names) {
   for (const n of names) {
     const u = new URL(dir + encodeURIComponent(n), location.href);
-    try { const r = await fetch(u, { method: 'HEAD', cache: 'no-store' }); if (r.ok) return u; } catch { return null; }
+    try {
+      const r = await fetch(u, { method: 'HEAD', cache: 'no-store' }); if (r.ok) return u;
+      if (r.status === 401) { gameLogin = new URL(dir + 'login', location.href); return null; }
+    } catch { return null; }
   }
   return null;
 }
@@ -351,6 +355,11 @@ const autoGame = (async () => {
       const lb = $('files').parentElement; if (lb.firstChild.nodeType === 3) lb.firstChild.nodeValue = 'Replay…';
     } catch { picked.exe = picked.dat = picked.patch = null; }
     return;
+  }
+  if (gameLogin) {   // the files are there, for the people with the login: a link to it (it comes back here)
+    setStatus('The game files on this server need a login (or pick your own Warcraft II BNE.exe and War2Dat.mpq): ');
+    const a = document.createElement('a'); a.href = gameLogin.href + '?back=' + encodeURIComponent(location.pathname + location.search + location.hash);
+    a.textContent = 'log in'; ui.status.append(a);
   }
 })();
 

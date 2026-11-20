@@ -37,6 +37,13 @@ Either:
     With --viewer it also serves the viewer, so on a LAN everyone opens http://that-computer:8080/.
 Not the game PC itself: every viewer would download from it while the game is played.
 
+The Worker can also hand out the Warcraft II files (Warcraft II BNE.exe, War2Dat.mpq, War2Patch.mpq) to the
+people with a login, so they need not pick them: deploy.sh takes them from the game/ folder next to the viewer on
+the deploying computer (never from git) and the Worker serves them under /game/ only after a login, set once with
+"npx wrangler secret put GAME_USER" and "npx wrangler secret put GAME_PASS". The viewer then shows a "log in" link;
+after logging in (a cookie, a year) it loads them by itself. Without the login nobody gets them: they are
+Blizzard's, give the login only to people who own the game.
+
 The viewer
 ----------
 Live games show at the top of the Replay list (relays.json next to the viewer lists the relays:

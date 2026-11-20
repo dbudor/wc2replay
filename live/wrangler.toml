@@ -1,5 +1,6 @@
 # w2live relay on Cloudflare (worker.js) + the viewer itself, from one address: ./deploy.sh (it deploys what is
-# committed, not the working folder); once: npx wrangler secret put TOKEN
+# committed, not the working folder; the game files from its game/ folder); once: npx wrangler secret put TOKEN,
+# and for the game files' login GAME_USER and GAME_PASS
 name = "w2live"
 main = "worker.js"
 compatibility_date = "2025-06-01"
@@ -25,3 +26,5 @@ KEEP_DAYS = "30"    # a game is deleted this long after it ended
 # what is not the viewer.
 [assets]
 directory = ".."
+binding = "ASSETS"
+run_worker_first = ["/game/*"]   # the game files: only through worker.js's login check
