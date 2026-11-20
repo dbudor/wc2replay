@@ -12,8 +12,9 @@
 //                                       text {"done": true, "size": n} when it is complete, {"readyIn": s} (delay)
 //   GET  /api/live/<id>/final           the finished .w2r.gz
 //   POST /api/live/<id>/meta | append?offset=N | final | done   (Authorization: Bearer TOKEN)
+//   DELETE /api/live/<id>               the game and its stream, for good (Authorization: Bearer TOKEN)
 const ID = /^[\w.-]{1,96}$/;
-const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-expose-headers': 'x-live-size, x-live-done, x-live-ready-in' };
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS', 'access-control-expose-headers': 'x-live-size, x-live-done, x-live-ready-in' };
 const json = (o, status = 200, h = {}) => new Response(JSON.stringify(o), { status, headers: { ...CORS, 'content-type': 'application/json', 'cache-control': 'no-store', ...h } });
 const text = (t, status) => new Response(t, { status, headers: CORS });
 const PIECE = 1 << 20;   // SQLite rows stay under its 2 MB value limit
@@ -82,7 +83,7 @@ export default {
     }
     const id = decodeURIComponent(m[1]);
     if (!ID.test(id)) return text('bad id', 400);
-    if (req.method === 'POST' && env.TOKEN && req.headers.get('authorization') !== `Bearer ${env.TOKEN}`) return text('token', 401);
+    if ((req.method === 'POST' || req.method === 'DELETE') && env.TOKEN && req.headers.get('authorization') !== `Bearer ${env.TOKEN}`) return text('token', 401);
     return env.GAMES.get(env.GAMES.idFromName('game:' + id)).fetch(req);
   },
 };
@@ -90,6 +91,9 @@ export default {
 export class LiveGame {
   constructor(ctx, env) {
     this.ctx = ctx; this.env = env; this.sql = ctx.storage.sql; this.waiters = new Set();
+    this.tables();
+  }
+  tables() {   // (again after a delete: deleteAll drops them)
     this.sql.exec('CREATE TABLE IF NOT EXISTS piece (start INTEGER PRIMARY KEY, t INTEGER, data BLOB)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS final (n INTEGER PRIMARY KEY, data BLOB)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT)');
@@ -137,6 +141,13 @@ export class LiveGame {
   async fetch(req) {
     const url = new URL(req.url), act = (/^\/api\/live\/[^/]+\/(\w+)/.exec(url.pathname) || [])[1] || '';
     const id = decodeURIComponent(url.pathname.split('/')[3] || '');
+    if (req.method === 'DELETE') {   // the game and its stream, for good (Authorization: Bearer TOKEN)
+      if (!this.get('meta')) return text('no such game', 404);
+      for (const ws of this.ctx.getWebSockets()) try { ws.close(1000, 'deleted'); } catch { /* gone */ }
+      await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); this.tables();
+      await this.index('remove', { id });
+      return json({ deleted: id });
+    }
     if (req.method === 'GET') {
       if (!this.get('meta')) return text('no such game', 404);
       if (act === 'final') {

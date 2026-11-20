@@ -16,6 +16,7 @@
 //   GET  /api/live/<id>/final          the finished .w2r.gz
 //   POST /api/live/<id>/meta           JSON (recorder)        POST /api/live/<id>/append?offset=N   gzip body
 //   POST /api/live/<id>/final          .w2r.gz                POST /api/live/<id>/done
+//   DELETE /api/live/<id>              the game and its files, for good (--token)
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -95,9 +96,15 @@ http.createServer(async (req, res) => {
       return gz(req, res, bytes(g, from, Math.max(from, a.n)), { 'content-type': 'application/octet-stream', 'cache-control': 'no-store',
         'x-live-size': String(a.n), 'x-live-done': g.done && a.n === g.size ? '1' : '0', ...(a.next !== null ? { 'x-live-ready-in': String(Math.ceil(a.next / 1000)) } : {}) });
     }
-    if (req.method !== 'POST') return send(res, 405, 'method');
+    if (req.method !== 'POST' && req.method !== 'DELETE') return send(res, 405, 'method');
     if (TOKEN && req.headers.authorization !== `Bearer ${TOKEN}`) return send(res, 401, 'token');
     if (!id) return send(res, 400, 'id');
+    if (req.method === 'DELETE') {   // the game and its files, for good
+      const g0 = load(id); if (!g0) return send(res, 404, 'no such game');
+      g0.done = true; wake(g0); games.delete(id);
+      for (const f of [`${id}.json`, `${id}.w2r`, `${id}.final.w2r.gz`]) fs.rmSync(path.join(DIR, f), { force: true });
+      console.log(`${id}: deleted`); return json(res, 200, { deleted: id });
+    }
     const b = await body(req);
     let g = load(id);
     if (act === 'meta') {

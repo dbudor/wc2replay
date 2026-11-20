@@ -46,6 +46,8 @@ Blizzard's, give the login only to people who own the game.
 
 The viewer
 ----------
+To delete games from the relay for good (tests, mistakes): "sh delete.sh ID..." in this folder (it asks for the
+relay's token; the ids are in RELAY/api/live). The recorder's own files are not touched.
 Lobbies show too, as soon as someone hosts one ("○ ... lobby"): opening one shows the chat room as it fills
 (the players as they join, their slots and ready marks, the map and the settings; races are only known at the
 start), and the game itself when the host starts it. A lobby left without a game drops off the list.
