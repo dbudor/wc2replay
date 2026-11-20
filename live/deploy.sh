@@ -10,6 +10,7 @@ git rev-parse --git-dir >/dev/null
 [ -z "$(git status --porcelain)" ] || echo "note: uncommitted changes are NOT deployed (deploying $(git rev-parse --short HEAD))"
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 git archive HEAD | tar -x -C "$T"
+rm -rf "$T/game"   # game files only as below (split, behind the login), whatever git holds
 G=${GAME_DIR:-game}
 if [ -f "$G/Warcraft II BNE.exe" ] && [ -f "$G/War2Dat.mpq" ]; then
   mkdir -p "$T/game"
