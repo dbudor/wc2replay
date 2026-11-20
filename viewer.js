@@ -689,6 +689,7 @@ async function showLiveLobby(relay, id, src) {
     let g = null; try { g = (await listLive(relay)).find(x => x.id === id); } catch { /* again */ }
     if (liveLobby !== me || src.headReady) return;
     if (g && g.state === 'closed') { stopLive(); setStatus('That lobby closed without a game.'); return; }
+    if (g) src.waitLonger = true;   // the relay has it (a lobby, or the game starting): wait for it however long
     if (g && g.lobby) {
       const L = liveLobbyModel(st.art || loadScreenArt(() => null), g.lobby);
       me.img = st.art && st.art.lobbyOk ? surfaceCanvas(renderLobby(st.art, L)) : null;
@@ -1163,6 +1164,7 @@ window.addEventListener('keydown', e => {
   if (!st.session || e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
   if (e.key === ' ') { e.preventDefault(); playPressed(); }
   else if (!e.ctrlKey && !e.metaKey && !e.altKey && HUD_KEYS[e.key.toLowerCase()]) HUD_KEYS[e.key.toLowerCase()]();
+  else if (e.key === 'Escape' && document.body.classList.contains('setOpen')) setSettingsOpen(false);
   else if (e.key === 'Escape' && !sw.el.hidden) setStats(false);
   else if (e.key === 'Escape' && st.inspect) { st.inspect = null; drawInspect(st.session.mem()); }
   else if (e.key === '.') stepPressed();
@@ -1171,7 +1173,10 @@ window.addEventListener('keydown', e => {
   else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFog();
   else if ((e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !lobbyUp()) toggleFollow();
   else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.metaKey) { ui.hp.checked = !ui.hp.checked; ui.hp.onchange(); }
-  else if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey && st.cam.tracks.size) { ui.camShow.checked = !ui.camShow.checked; ui.camShow.onchange(); }
+  else if ((e.key === 'r' || e.key === 'R') && !e.ctrlKey && !e.metaKey && !$('vuBox').hidden) {   // the Kmečometar
+    const v = $('vuShow'); v.checked = !v.checked; v.dispatchEvent(new Event('change')); toast(v.checked ? 'Kmečometar shown' : 'Kmečometar hidden');
+  }
+  else if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey && st.cam.tracks.size) { ui.camShow.checked = !ui.camShow.checked; ui.camShow.onchange(); toast(ui.camShow.checked ? 'Cameras shown' : 'Cameras hidden'); }
   else if ((e.key === 'i' || e.key === 'I') && !e.ctrlKey && !e.metaKey && !ui.inputBox.hidden) { ui.inputShow.checked = !ui.inputShow.checked; toast(ui.inputShow.checked ? 'Input shown (player view)' : 'Input hidden'); }
   else if (e.key >= '1' && e.key <= '8' && !e.ctrlKey && !e.metaKey && !e.altKey) {   // view player 1..8 (if in the game)
     const v = String(+e.key - 1);
@@ -1255,8 +1260,16 @@ function resize() {
 const viewCentre = () => ({ x: st.view.x + ui.view.width / st.view.scale / 2, y: st.view.y + ui.view.height / st.view.scale / 2 });
 new ResizeObserver(resize).observe(ui.wrap);
 const mapPx = () => 32 * st.session.mem().r16(A.MapSize);
+// the smallest zoom: the map at least as big as the window's smaller side (it fills that side; the longer one may show
+// the background beside it)
+const minScale = () => { const M = st.session ? mapPx() : 0; return M ? Math.min(ui.view.width, ui.view.height) / M : 0.1; };
 function clampView() {
-  const v = st.view, W = ui.view.width / v.scale, H = ui.view.height / v.scale, M = mapPx();
+  const v = st.view, mn = minScale();
+  if (v.scale < mn) {   // (a window made bigger, a remembered zoom): as far out as allowed, about the same centre
+    const cx = v.x + ui.view.width / v.scale / 2, cy = v.y + ui.view.height / v.scale / 2;
+    v.scale = mn; v.x = cx - ui.view.width / mn / 2; v.y = cy - ui.view.height / mn / 2;
+  }
+  const W = ui.view.width / v.scale, H = ui.view.height / v.scale, M = mapPx();
   v.x = W >= M ? (M - W) / 2 : Math.max(0, Math.min(M - W, v.x));
   v.y = H >= M ? (M - H) / 2 : Math.max(0, Math.min(M - H, v.y));
 }
@@ -1281,7 +1294,7 @@ function pinchStart() {
 function pinchMove() {
   const [a, b] = [...pointers.values()], r = ui.view.getBoundingClientRect(), d = window.devicePixelRatio || 1, v = st.view;
   const mx = ((a.x + b.x) / 2 - r.left) * d, my = ((a.y + b.y) / 2 - r.top) * d;
-  v.scale = Math.max(0.1, Math.min(8, pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist));
+  v.scale = Math.max(minScale(), Math.min(8, pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist));
   v.x = pinch.wx - mx / v.scale; v.y = pinch.wy - my / v.scale; clampView(); st.viewWant = viewCentre();
 }
 ui.view.addEventListener('pointerdown', e => {
@@ -1364,7 +1377,7 @@ ui.view.addEventListener('wheel', e => {
   const d = window.devicePixelRatio || 1, r = ui.view.getBoundingClientRect(), v = st.view;
   const mx = (e.clientX - r.left) * d, my = (e.clientY - r.top) * d;
   const wx = v.x + mx / v.scale, wy = v.y + my / v.scale;
-  v.scale = Math.max(0.1, Math.min(8, v.scale * Math.exp(-e.deltaY * 0.0015)));
+  v.scale = Math.max(minScale(), Math.min(8, v.scale * Math.exp(-e.deltaY * 0.0015)));
   v.x = wx - mx / v.scale; v.y = wy - my / v.scale; clampView(); st.viewWant = viewCentre();
 }, { passive: false });
 function miniMove(e) {
@@ -1375,7 +1388,7 @@ function miniMove(e) {
 let miniDrag = false;
 ui.mini.addEventListener('pointerdown', e => { if (!st.session) return; miniDrag = true; ui.mini.setPointerCapture(e.pointerId); miniMove(e); });
 ui.mini.addEventListener('pointermove', e => { if (miniDrag) miniMove(e); });
-ui.mini.addEventListener('pointerup', () => { miniDrag = false; });
+for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) ui.mini.addEventListener(ev, () => { miniDrag = false; });   // (a stuck flag would freeze the panels' side)
 
 let lastPanel = 0, lastDraw = 0;
 // Player view: the game's 640x480 screen (playerview.js PlayerFrame) scaled to fit the canvas.
@@ -1527,6 +1540,7 @@ function draw() {
     if (lastDraw - lastPanel > 200) { lastPanel = lastDraw; drawInspect(m); }
     if (st.screen && updateScreen()) drawScreen(ctx, W, H);
     updateClock();
+    placeMapBtns();
     return;
   }
   const dt = lastDraw ? Math.min(250, performance.now() - lastDraw) : 0;
@@ -1935,12 +1949,12 @@ for (const [id, k, def] of [['waveShow', 'w2v.wave', true], ['vuShow', 'w2v.vu',
   try { const v = localStorage.getItem(k); if (v !== null) el.checked = v === '1'; } catch { /* private window */ }
   el.addEventListener('change', () => { try { localStorage.setItem(k, el.checked ? '1' : '0'); } catch { /* private window */ } drawWave(); vuUpdate(); });
 }
-// ---- Kmečometar: an analog meter of how worked up the watched player (fog / player view) sounds now, else one meter
+// ---- Kmečometar (always above the minimap): an analog meter of how worked up the watched player (fog / player view) sounds now, else one meter
 // a team (its member furthest from their normal), in R (Rubelj) from −2 to +2: the frame intensity (frameIntensity:
 // against their whole-game normal, in units of their spread) furthest from 0 over the last 120 ms of game time, 0 in
 // silence. Positive values hold: the needle stays at a peak 1.5 s and then falls back to 0 over 2 s, unless it goes
 // higher meanwhile; below 0 (and once the peak is gone) it shows the value now. The needle has a little inertia
-// (~60 ms). Below the score strip when there is room (stacked), else at the bottom towards the centre (side by side).
+// (~60 ms). Placed by placeVu: above the minimap and its buttons (player view: by the game's own minimap, top left).
 const VU_LIM = 2, VU_HOLD = 1500, VU_FALL = 2000, VU_DEG = 45, VU_W = 172, VU_CX = 86, VU_CY = 118, VU_R = 92;
 const vu = { el: $('vuPanel'), sig: '', meters: [], cache: new Map(), raf: 0, last: 0, placed: 0 };
 function vuFrames(p) {
@@ -1972,7 +1986,7 @@ function vuFace(rgb) {
 function vuUpdate() {
   const tracks = st.session && voice.on && $('vuShow').checked ? voiceTracks() : new Map();
   const groups = tracks.size ? statsGroups(st.session.mem()).map(g => ({ ...g, ps: g.members.filter(p => tracks.has(p)) })).filter(g => g.ps.length) : [];
-  vu.el.hidden = !groups.length;
+  if (vu.el.hidden !== !groups.length) { vu.el.hidden = !groups.length; if (st.session) requestAnimationFrame(() => { placeVu(); placeHud(); }); }
   if (!groups.length) { cancelAnimationFrame(vu.raf); vu.raf = 0; vu.sig = ''; return; }
   voiceEnsure();
   const sig = groups.map(g => `${g.name}:${g.ps.join()}:${g.rgb}`).join('/');
@@ -1985,17 +1999,21 @@ function vuUpdate() {
   }
   if (!vu.raf) vu.raf = requestAnimationFrame(vuTick);
 }
-// below the score strip (as wide, meters stacked) when it is shown and nothing is under it down to the timeline,
-// else bottom centre, side by side
 function placeVu() {
   if (vu.el.hidden) return;
-  const sc = ui.score, par = vu.el.offsetParent; let css = '';
-  if (sc.offsetParent && par && !st.pv.on && !narrow.matches) {
-    const pr = par.getBoundingClientRect(), r = sc.getBoundingClientRect(), sr = ui.side.getBoundingClientRect();
-    const top = r.bottom + 8, need = vu.meters.length * (r.width * 104 / VU_W + 30) + 10;
-    const floor = ui.controls.hidden || document.body.classList.contains('seek-hide') ? pr.bottom - 12 : ui.controls.getBoundingClientRect().top - 10;
-    const sideUnder = sr.width && sr.bottom > top && sr.right > r.left && sr.left < r.right;
-    if (!sideUnder && top + need <= floor) css = `left: ${r.left - pr.left}px; top: ${top - pr.top}px; bottom: auto; transform: none; width: ${r.width}px; flex-direction: column;`;
+  const par = vu.el.offsetParent; let css = '';
+  if (par && !narrow.matches) {
+    const flip = document.body.classList.contains('flip') && !st.pv.on, near = flip ? 'right' : 'left', far = flip ? 'left' : 'right';
+    if (st.pv.on && st.pv.rect) {
+      // the player view: the game's minimap is at its screen's top left: in the margin left of the screen, at the
+      // top (stacked); a narrow margin: the top-left corner, smaller
+      const d = window.devicePixelRatio || 1, m = st.pv.rect.x / d;
+      const w = m >= 132 ? Math.min(VU_W, m - 20) : 120, left = m >= 132 ? Math.round((m - w) / 2) : 12;
+      css = `left: ${left}px; right: auto; top: 12px; bottom: auto; transform: none; width: ${Math.round(w)}px; flex-direction: column;`;
+    } else {   // above the minimap: over its button row, as wide as the minimap (the players panel ends above it)
+      const pr = par.getBoundingClientRect(), b = $('mapBtns').getBoundingClientRect(), w = Math.max(miniCard.offsetWidth, 200);
+      css = `${far}: auto; ${near}: 12px; top: auto; bottom: ${Math.round(pr.bottom - b.top + 8)}px; transform: none; width: ${w}px;`;
+    }
   }
   if (vu.el._k !== css) { vu.el.style.cssText = css; vu.el._k = css; }
 }
@@ -2106,29 +2124,58 @@ sw.body.addEventListener('pointerleave', () => { sw.hover = null; statsHover(nul
 // M picks the side: auto (as above), always left, always right.
 const miniCard = $('miniCard');
 // the timeline's height (CSS --ctl-h): the panels and the minimap sit above it
-new ResizeObserver(() => { document.body.style.setProperty('--ctl-h', `${ui.controls.offsetHeight}px`); if (st.session) placeHud(); }).observe(ui.controls);
+new ResizeObserver(() => { document.body.style.setProperty('--ctl-h', `${ui.controls.offsetHeight}px`); if (st.session) placeHud(); if (document.body.classList.contains('setOpen')) placeSetPop(); }).observe(ui.controls);
 let hudW = 0, hudSide = 'auto';
 try { hudSide = ['left', 'right'].includes(localStorage.getItem('w2v.side')) ? localStorage.getItem('w2v.side') : 'auto'; } catch { /* private window */ }
+// The buttons by the minimap in the player view (no minimap of ours there): a row from the bottom-left corner when it
+// fits in the margin left of the game's screen, else a column up the edge (a second one when the window is short)
+function placeMapBtns() {
+  const el = $('mapBtns'), d = window.devicePixelRatio || 1;
+  let col = false;
+  if (st.pv.on && st.pv.rect && !narrow.matches && !lsPhone.matches) {
+    const btns = [...el.children].filter(b => b.offsetParent), rowW = btns.length * 36 + Math.max(0, btns.length - 1) * 5;
+    col = rowW + 24 > st.pv.rect.x / d;
+  }
+  if (el.classList.contains('col') !== col) {
+    el.classList.toggle('col', col);
+    el.style.maxHeight = col ? 'calc(100vh - var(--hud-b) - 24px)' : '';
+  }
+}
+const FLIP_TILES = 8;
+// the watched player's selection, [left, right] in map pixels (null: nobody watched / nothing selected)
+function selSpan(m) {
+  const p = watched(); if (p < 0) return null;
+  const sel = selectionOf(m, p).filter(u => !(m.r16(u + 0x1e) & 8));
+  if (!sel.length) return null;
+  let x0 = Infinity, x1 = -Infinity;
+  for (const u of sel) { const x = m.s16(u), t = m.r8(u + 0x27); x0 = Math.min(x0, x); x1 = Math.max(x1, x + 32 * m.r16(A.TypeSize + 4 * t)); }
+  return [x0, x1];
+}
 function placeSides() {
   if (narrow.matches) { placeHud(); return; }
   if (hudSide !== 'auto') document.body.classList.toggle('flip', hudSide === 'right');
   else if (!miniDrag) {
+    // the panels go to the other side only when the map edge on their side is under them, the other edge is off
+    // the screen past their width, and the watched player's selection is within FLIP_TILES of their edge; the
+    // same for either side, mirrored. Otherwise (no selection near it) they stay where they are
     const d = window.devicePixelRatio || 1, k = st.view.scale / d, W = ui.view.width / d;
     const L = -st.view.x * k, R = L + mapPx() * k, P = hudW + 12;
-    const on = document.body.classList.contains('flip');
-    if (!on && L > -P && R > W + P) document.body.classList.add('flip');
-    else if (on && (L < -P - 96 || R < W + P - 96)) document.body.classList.remove('flip');
+    const on = document.body.classList.contains('flip'), sp = selSpan(st.session.mem()), E = FLIP_TILES * 32;
+    if (!on && L > -P && R > W + P && sp && sp[0] < E) document.body.classList.add('flip');
+    else if (on && R < W + P && L < -P && sp && mapPx() - sp[1] < E) document.body.classList.remove('flip');   // the same, mirrored
   }
   placeHud();
 }
 function placeHud() {
+  placeMapBtns();
   if (narrow.matches || st.pv.on) { ui.side.style.cssText = ui.score.style.cssText = ''; ui.side._k = ui.score._k = ''; placeVu(); return; }
   const flip = document.body.classList.contains('flip'), near = flip ? 'right' : 'left', far = flip ? 'left' : 'right';
   const panel = !document.body.classList.contains('sideMin'), Hs = ui.score.offsetHeight;   // 0 while hidden
   // desktop: the buttons are a row above the minimap; a phone on its side has them as a column along the edge, so the
   // panel and the score strip start past it (and may reach down to the minimap)
   const col = lsPhone.matches, x0 = col ? 12 + $('mapBtns').offsetWidth + 8 : 12;
-  const bottom = miniCard.getBoundingClientRect().top - (col ? 8 : 52);
+  const vuH = !vu.el.hidden && !col ? vu.el.offsetHeight + 8 : 0;   // the Kmečometar above the minimap's buttons
+  const bottom = miniCard.getBoundingClientRect().top - (col ? 8 : 52) - vuH;
   const stack = !panel || 12 + (Hs && Hs + 8) + ui.side.scrollHeight <= bottom, top = stack ? 12 + (Hs && Hs + 8) : 12;
   const sw = panel ? ui.side.offsetWidth : 0, cw = ui.score.offsetWidth;
   const set = (el, css) => { if (el._k !== css) { el.style.cssText = css; el._k = css; } };
@@ -2158,9 +2205,21 @@ function setMiniShown(on) {
 miniBtn.onclick = () => setMiniShown(document.body.classList.contains('miniOff'));
 // phones: the menu (top bar: replays, Share), the timeline's settings row, the players sheet
 $('menuBtn').onclick = () => document.body.classList.toggle('menuOpen');
-$('setBtn').onclick = () => document.body.classList.toggle('setOpen');
+// the settings popup (the gear): view toggles, the player view's options, sound; closes on Esc or a click on the map
+function setSettingsOpen(on) { document.body.classList.toggle('setOpen', on); $('setBtn').setAttribute('aria-expanded', String(on)); if (on) placeSetPop(); }
+// right above the gear, its right edge on the gear's (phones: across the screen, CSS)
+function placeSetPop() {
+  const pop = $('setPop'), par = pop.offsetParent;
+  if (!par || narrow.matches || lsPhone.matches) { pop.style.right = pop.style.bottom = ''; return; }
+  const pr = par.getBoundingClientRect(), b = $('setBtn').getBoundingClientRect(), c = ui.controls.getBoundingClientRect();
+  pop.style.right = `${Math.max(8, Math.round(pr.right - b.right))}px`;
+  pop.style.bottom = `${Math.round(pr.bottom - c.top + 8)}px`;
+}
+addEventListener('resize', () => { if (document.body.classList.contains('setOpen')) placeSetPop(); });
+$('setBtn').onclick = () => setSettingsOpen(!document.body.classList.contains('setOpen'));
+$('setX').onclick = () => setSettingsOpen(false);
 document.querySelector('.sideHead').onclick = e => { if (narrow.matches && !e.target.closest('button')) document.body.classList.toggle('sheetOpen'); };
-ui.view.addEventListener('pointerdown', () => { document.body.classList.remove('menuOpen', 'setOpen'); if (narrow.matches) document.body.classList.remove('sheetOpen'); });
+ui.view.addEventListener('pointerdown', () => { document.body.classList.remove('menuOpen'); setSettingsOpen(false); if (narrow.matches) document.body.classList.remove('sheetOpen'); });
 // ---- score strip on / off and the timeline's mode (auto / show / hide), buttons above the minimap; remembered
 const scoreBtn = $('scoreBtn'), seekBtn = $('seekBtn');
 const SEEK_MODES = { auto: ['show', 'Timeline: auto (fades while playing)'], show: ['hide', 'Timeline: always shown, under the map'], hide: ['auto', 'Timeline: hidden'] };

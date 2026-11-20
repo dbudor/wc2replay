@@ -79,7 +79,6 @@
       <button id="follow" class="iconBtn mapBtn" hidden aria-pressed="false" title="Follow this player's recorded camera (its selection without one); moving the map yourself stops it (L)"><svg><use href="#i-follow"/></svg></button>
       <button id="scoreBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the score strip (S)"><svg><use href="#i-score"/></svg></button>
       <button id="seekBtn" class="iconBtn mapBtn" data-mode="auto" title="Timeline: auto (fades while playing) (T)"><svg><use href="#i-seek"/></svg></button>
-      <button id="statsBtn" class="iconBtn mapBtn" aria-pressed="false" title="Match stats: units made, kills, economy and army over time, so far (K)"><svg><use href="#i-stats"/></svg></button>
       <button id="miniBtn" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the minimap"><svg><use href="#i-map"/></svg></button>
       <button id="sideOpen" class="iconBtn mapBtn on" aria-pressed="true" title="Show / hide the players panel (Y)"><svg><use href="#i-panel"/></svg></button>
       <label class="iconBtn mapBtn pvBtn" title="Player view: the replay as the fog-of-war player saw it: its fog, selection, camera, sounds and the game's own screen (P)"><input id="pview" type="checkbox"><svg><use href="#i-pview"/></svg></label>
@@ -125,24 +124,30 @@
       <button id="liveBtn" class="liveBtn" hidden title="A live game: the latest moment that has arrived. Click to go there">LIVE</button>
       <span id="clock" class="clock" role="button" tabindex="0" title="Go to a time: click and type it (G)">0:00</span>
       <input id="timeIn" class="timeIn" hidden autocomplete="off" spellcheck="false" inputmode="text" placeholder="m:ss" title="Game time to go to: h:mm:ss, m:ss, or minutes. Enter goes, Esc cancels">
-      <span class="viewTogs">
+      <button id="statsBtn" class="iconBtn" aria-pressed="false" title="Match stats: units made, kills, economy and army over time, so far (K)"><svg><use href="#i-stats"/></svg></button>
+      <button id="setBtn" class="iconBtn" aria-controls="setPop" aria-expanded="false" title="View and sound settings"><svg><use href="#i-gear"/></svg></button>
+      <button id="fullBtn" class="iconBtn" hidden title="Full screen (X)"><svg><use href="#i-full"/></svg></button>
+    </div>
+  </div>
+  <div id="setPop" class="setPop glass" role="dialog" aria-label="View and sound settings">
+    <div class="setTop"><span class="setTitle">Settings</span><button id="setX" class="iconBtn setX" title="Close (Esc)">×</button></div>
+    <div class="setHead">View</div>
+    <span class="viewTogs">
         <label class="chk" title="HP bars (H)"><input id="hp" type="checkbox" autocomplete="off"> HP bars</label>
         <label id="camBox" class="chk" hidden title="Recorded viewports and mouse cursors of the players who ran the CamRec plugin (C). In the player view the camera then follows that player's own screen."><input id="camShow" type="checkbox" checked> Cameras</label>
         <label id="inputBox" class="chk" hidden title="Player view: the recorded mouse buttons, drag box and keys of that player (I): clicks, the box being dragged, the pressed command button, the keys pressed and actions per minute. Needs a recording by the current CamRec plugin."><input id="inputShow" type="checkbox" checked> Input</label>
         <label id="waveBox" class="chk" hidden title="The watched player's voice above the timeline: loudness and how worked up they sounded"><input id="waveShow" type="checkbox" checked> Voice</label>
-        <label id="vuBox" class="chk" hidden title="Kmečometar: how worked up the watched player (or each team) sounds right now, from −2 R to +2 R (R: Rubelj; 0 = their own normal), the peak held 1.5 s"><input id="vuShow" type="checkbox"> Kmečometar</label>
+        <label id="vuBox" class="chk" hidden title="Kmečometar (R): how worked up the watched player (or each team) sounds right now, from −2 R to +2 R (R: Rubelj; 0 = their own normal), the peak held 1.5 s"><input id="vuShow" type="checkbox"> Kmečometar</label>
       </span>
-      <span id="pvSlot" class="pvSlot"></span>
-      <span class="audio">
+    <span id="pvSlot" class="pvSlot"></span>
+    <div class="setHead">Sound</div>
+    <span class="audio">
         <label title="Volume. Sound starts with your first click or key press"><span class="lbl">vol</span> <input id="volume" type="range" min="0" max="100" value="70"></label>
         <label title="Unit voices: selection / acknowledge (and, in the player view, its notices). The checkbox: in the free view, also the selection / acknowledge voices of the Fog-of-war player's clicks (of the recording machine's player with fog &quot;all&quot;); the player view always plays them."><input id="voices" type="checkbox"> <span class="lbl">voices</span> <input id="voiceVol" type="range" min="0" max="100" value="100" title="Voice volume"></label>
         <label title="Sound effects: combat, buildings, spells..."><span class="lbl">fx</span> <input id="fxVol" type="range" min="0" max="100" value="100"></label>
         <span id="micsBox" hidden><label title="The players' microphones (CamRec plugin), at 1x speed. Pick whom to listen to with the mic buttons in the players list."><input id="mics" type="checkbox"> <span class="lbl">mics</span> <input id="micVol" type="range" min="0" max="400" value="100" title="Microphone volume"></label>
           <label title="Listen only to the player picked in Fog of war (keys 1-8); with fog &quot;all&quot;, to the mics picked in the players list"><input id="micLink" type="checkbox" checked> <span class="lbl">follows view</span></label></span>
       </span>
-      <button id="setBtn" class="iconBtn" title="Sound and view settings"><svg><use href="#i-gear"/></svg></button>
-      <button id="fullBtn" class="iconBtn" hidden title="Full screen (X)"><svg><use href="#i-full"/></svg></button>
-    </div>
   </div>
 </main>
 <script type="module" src="viewer.js"></script>

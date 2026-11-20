@@ -47,18 +47,23 @@ A replay starts on the game's chat-room screen (who played, races, map and optio
 end the game's victory / defeat statistics screen is shown for the player picked under "Fog of war" (or the
 recording player); its "Stats" button opens the match stats (below).
 
-Controls: Play/Pause, Step (one network turn), speed, timeline seek, drag to scroll, wheel to zoom, click
-the minimap, fog of war as any player.
+Controls: Play/Pause, Step (one network turn), speed, timeline seek, drag to scroll, wheel to zoom (out only until the map is as big as the window's shorter side), click
+the minimap, fog of war as any player. The gear at the timeline's end opens the settings: HP bars, cameras, input,
+voice, Kmečometar, and the sound (volume, unit voices, effects, microphones); its ×, Esc or a click on the map
+closes it.
+Panels "away from the map edge" (M) change sides only when the watched player's selection is within 8 tiles of
+the edge they are on.
 Keys: Space play/pause, . step one turn, Left/Right skip 10 s back/forward, 1-8 view as player 1-8,
 9 no fog, P toggle player view (that player's fog, selection, camera, UI and voices). With a player picked:
 F fog on/off (the view stays on that player), L follow that player's camera on/off (its recorded screen, else its
-selection; dragging the map or the minimap stops it). H toggle HP bars, Esc close the unit card, B copy a
+selection; dragging the map or the minimap stops it). H toggle HP bars, C the recorded cameras, R the Kmečometar, Esc close the unit card, B copy a
 commentary balloon entry (below).
 Click a unit or building on the map (free or player view) for its stats, as the game's status panel has them, for
 any player: armor, damage, range, sight with upgrade bonuses, speed, magic, current order, a worker's load, a
 transport's cargo, spell timers; construction and training / research progress with the time left; gold or oil
 left in a mine, food grown/used at a farm, a town hall's production rates. The card follows the unit as it plays.
-Match stats (K, or the bar-chart button by the minimap) open a window over the page, for the game so far: with a
+Match stats (K, or the bar-chart button on the timeline; it, Esc or the window's × close it) open a window over
+the map, above the timeline, for the game so far: with a
 player picked (keys 1-8, or a click in the score strip), that player; with fog "all", team 1 against team 2 (as
 the score strip splits them).
 * Units: an icon for each unit and building type, with how many are alive now (top number) over how many were
@@ -153,7 +158,7 @@ In the viewer:
   around; Follow / L goes back to the recording;
 * in the free view each player's viewport and cursor are drawn on the map and minimap (the fog-of-war player, or
   everyone when fog is "all");
-* "Cameras" (key C) turns all of this off;
+* "Cameras" (key C; in the settings behind the gear at the timeline's end) turns all of this off;
 * the Player view also shows that player's input (recordings by the current plugin): the drag box as they dragged it,
   a ring where they clicked (yellow left, red right), the command button they pressed, and beside the screen their
   mouse buttons, Shift / Ctrl / Alt, the last keys pressed and actions per minute. "Input" (key I) hides it;
@@ -206,12 +211,12 @@ games; it contains no game assets and requires a legitimately owned copy of the 
 Voice (timeline and stats window)
 ---------------------------------
 With CamRec microphone recordings, watching one player (the fog / player view choice) shows their voice above the
-timeline ("Voice" box): the bars are how loud they spoke, the colour how worked up they sounded compared with their
-own normal in this game (blue calmer, grey normal, orange to red worked up); a click goes there. The "Kmečometar"
-box shows an analog meter of how worked up the watched player (or, with fog "all", each team: two meters) sounds
+timeline ("Voice" in the settings: the gear at the timeline's end): the bars are how loud they spoke, the colour how worked up they sounded compared with their
+own normal in this game (blue calmer, grey normal, orange to red worked up); a click goes there. "Kmečometar" (key R,
+or in the settings) shows an analog meter of how worked up the watched player (or, with fog "all", each team: two meters) sounds
 right now, from −2 R to +2 R (R: Rubelj; 0 = their own normal, 0 in silence). A rise above 0 is held 1.5 s and
-then falls back to 0 over 2 s; below 0 it shows the value of the moment. It sits under the score strip when there
-is room. The stats window's Voice tab charts it for every player: intensity from their pitch and
+then falls back to 0 over 2 s; below 0 it shows the value of the moment. It sits above the minimap (and its buttons);
+in the player view at the top left, by the game's own minimap; not on the end screen. The stats window's Voice tab charts it for every player: intensity from their pitch and
 loudness against their own average, and how many seconds a minute they talked. It shows how excited someone
 sounds, not why: it is no stress or lie detector. These are real people's voices: look at this only with their
 agreement. The analysis runs in the browser only; switch it off on the Voice tab (remembered in this browser).

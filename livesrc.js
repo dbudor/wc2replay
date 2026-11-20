@@ -89,12 +89,13 @@ export class LiveSource {
     })();
   }
   stop() { this.running = false; if (this.ws) try { this.ws.close(); } catch { /* closed */ } }
-  // resolves when the header and the first turn are here
+  // resolves when the header and the first turn are here. Gives up after timeoutMs unless waitLonger is set (the
+  // viewer sets it while the relay lists the game as a lobby: it may wait there for many minutes)
   async ready(timeoutMs = 60000) {
     const t0 = Date.now();
     while (!this.headReady) {
       if (!this.running && !this.done) throw new Error(this.error || 'the live stream stopped');
-      if (Date.now() - t0 > timeoutMs) throw new Error(this.error ? `relay: ${this.error}` : 'no data from the relay yet (the game may not have started)');
+      if (Date.now() - t0 > timeoutMs && !this.waitLonger) throw new Error(this.error ? `relay: ${this.error}` : 'no data from the relay yet (the game may not have started)');
       await new Promise(ok => setTimeout(ok, 200));
     }
   }
