@@ -2151,6 +2151,16 @@ function selSpan(m) {
   for (const u of sel) { const x = m.s16(u), t = m.r8(u + 0x27); x0 = Math.min(x0, x); x1 = Math.max(x1, x + 32 * m.r16(A.TypeSize + 4 * t)); }
   return [x0, x1];
 }
+// the panels' side: auto (away from the map edge), left, right; M or the settings; remembered
+function setHudSide(v) {
+  hudSide = ['left', 'right'].includes(v) ? v : 'auto';
+  try { localStorage.setItem('w2v.side', hudSide); } catch { /* private window */ }
+  $('hudSide').value = hudSide;
+  if (hudSide !== 'auto') document.body.classList.toggle('flip', hudSide === 'right');
+  if (st.session) placeHud();
+}
+$('hudSide').value = hudSide;
+$('hudSide').onchange = () => setHudSide($('hudSide').value);
 function placeSides() {
   if (narrow.matches) { placeHud(); return; }
   if (hudSide !== 'auto') document.body.classList.toggle('flip', hudSide === 'right');
@@ -2257,11 +2267,7 @@ const HUD_KEYS = {
   x: () => fullBtn.click(),
   b: () => copyBalloonStub(),
   k: () => setStats(sw.el.hidden),
-  m: () => {
-    hudSide = { auto: 'left', left: 'right', right: 'auto' }[hudSide];
-    try { localStorage.setItem('w2v.side', hudSide); } catch { /* private window */ }
-    toast(`Panels: ${hudSide === 'auto' ? 'auto (away from the map edge)' : hudSide}`);
-  },
+  m: () => { setHudSide({ auto: 'left', left: 'right', right: 'auto' }[hudSide]); toast(`Panels: ${hudSide === 'auto' ? 'auto (away from the map edge)' : hudSide}`); },
 };
 // ---- full screen (timeline button); hidden where the page cannot go full screen (iPhone Safari)
 const fullBtn = $('fullBtn');

@@ -300,6 +300,11 @@ body.playing .talkers, body.pview .talkers { top: 12px; }
 .inspect.float { position: absolute; top: 12px; right: 12px; width: 260px; background: var(--glass-hi); z-index: 4; box-shadow: 0 8px 30px #0009;
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 
+/* nothing on screen is selected by a mouse / touchpad drag or a long press (the timeline on a phone); typing fields still are */
+body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+input:not([type]), input[type=text], input[type=search], input[type=url], textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+.setField { color: var(--muted); font-size: 12px; }
+#seek { touch-action: none; }   /* a finger on the timeline drags it (no scroll / zoom of the page) */
 /* ---- settings (the gear at the timeline's end): view toggles, the player view's options, sound */
 #statsBtn { margin-left: auto; }
 body.setOpen #setBtn, #statsBtn.on { color: var(--accent); }

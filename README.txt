@@ -49,7 +49,7 @@ recording player); its "Stats" button opens the match stats (below).
 
 Controls: Play/Pause, Step (one network turn), speed, timeline seek, drag to scroll, wheel to zoom (out only until the map is as big as the window's shorter side), click
 the minimap, fog of war as any player. The gear at the timeline's end opens the settings: HP bars, cameras, input,
-voice, Kmečometar, and the sound (volume, unit voices, effects, microphones); its ×, Esc or a click on the map
+voice, Kmečometar, the panels' side (M), and the sound (volume, unit voices, effects, microphones); its ×, Esc or a click on the map
 closes it.
 Panels "away from the map edge" (M) change sides only when the watched player's selection is within 8 tiles of
 the edge they are on.
