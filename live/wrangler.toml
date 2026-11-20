@@ -1,4 +1,5 @@
-# w2live relay on Cloudflare (worker.js): npx wrangler deploy; npx wrangler secret put TOKEN
+# w2live relay on Cloudflare (worker.js) + the viewer itself, from one address: ./deploy.sh (it deploys what is
+# committed, not the working folder); once: npx wrangler secret put TOKEN
 name = "w2live"
 main = "worker.js"
 compatibility_date = "2025-06-01"
@@ -18,3 +19,9 @@ new_sqlite_classes = ["LiveGame", "LiveIndex"]
 [vars]
 MIN_DELAY = "0"     # seconds every game is held back at least (the recorder's "delay" adds to it)
 KEEP_DAYS = "30"    # a game is deleted this long after it ended
+
+# The viewer (this folder's parent: index.html, replays/, ...) as static files. A path that is a file is served as
+# one (free: no Worker request); anything else, i.e. /api/live/..., reaches worker.js. .assetsignore leaves out
+# what is not the viewer.
+[assets]
+directory = ".."

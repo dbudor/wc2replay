@@ -29,8 +29,10 @@ the network. For each game it writes to "out" (default: recordings\ next to it):
 The relay
 ---------
 Either:
-  - Cloudflare (free plan): in this folder, "npx wrangler deploy" then "npx wrangler secret put TOKEN"
-    (worker.js, wrangler.toml). Its URL goes into w2live.json and into the viewer's relays.json.
+  - Cloudflare (free plan): "npx wrangler login" once, then "sh deploy.sh" (it deploys what the repo has
+    committed: the relay, worker.js, and the viewer itself as static files) and once "npx wrangler secret put
+    TOKEN" in this folder. The viewer is then at the Worker's URL too (https://w2live.NAME.workers.dev/), with its
+    live games listed; the same URL goes into w2live.json and into relays.json of a viewer hosted elsewhere.
   - Any computer with Node.js: "node relay.mjs --port 8080 --token SECRET [--viewer ..]" (relay.bat).
     With --viewer it also serves the viewer, so on a LAN everyone opens http://that-computer:8080/.
 Not the game PC itself: every viewer would download from it while the game is played.
